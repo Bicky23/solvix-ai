@@ -111,6 +111,22 @@ Environment variables:
 | `unsubscribe` | Contact opted out |
 | `escalation_appropriate` | Valid escalation path |
 
+## Case Context
+
+The `CaseContext` model (in `src/api/models/requests.py`) provides context for AI decisions:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `party_id` | `str` | Debtor party identifier |
+| `obligations` | `list` | Outstanding obligations |
+| `promise_grace_days` | `int` | Days before promise is broken (default: 3) |
+| ... | ... | Other context fields |
+
+The `promise_grace_days` value is resolved by the backend:
+1. Party-level override (if set)
+2. Organization default
+3. System default (3 days)
+
 ## Testing
 
 ### Unit tests (no OpenAI calls)
@@ -125,9 +141,20 @@ pytest tests/
 ./venv/bin/pytest tests/
 ```
 
+### Test Suite
+
+| Test File | Coverage |
+| --------- | -------- |
+| `test_api.py` | API endpoint routing and response formats |
+| `test_classifier.py` | Email classification with all 13 categories |
+| `test_generator.py` | Draft generation with 5 tone types |
+| `test_gate_evaluator.py` | 6 gate evaluations (touch_cap, cooling_off, etc.) |
+| `test_live_integration.py` | Real OpenAI integration (requires API key) |
+
 ### Live integration tests (real OpenAI calls)
 
 `tests/test_live_integration.py` makes **real network calls** to OpenAI via `src/llm/client.py`. These tests:
+
 - require `OPENAI_API_KEY`
 - may incur cost and take longer
 - validate that we are not just returning dummy responses

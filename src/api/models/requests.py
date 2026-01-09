@@ -88,6 +88,10 @@ class CaseContext(BaseModel):
     brand_tone: str = "professional"
     touch_cap: int = 10
     touch_interval_days: int = 3
+    
+    # Promise verification settings
+    # This is the effective value (party override or org default)
+    promise_grace_days: int = 3
 
 
 class ClassifyRequest(BaseModel):
