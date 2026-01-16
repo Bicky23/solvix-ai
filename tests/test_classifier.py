@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
+from src.api.errors import LLMResponseInvalidError
 from src.api.models.responses import ClassifyResponse
 from src.engine.classifier import EmailClassifier
 
@@ -112,15 +113,19 @@ class TestEmailClassifier:
             assert result.classification == "UNSUBSCRIBE"
             assert result.confidence > 0.9
 
-    def test_classify_handles_json_parse_error(self, classifier, sample_classify_request):
-        """Test classifier handles malformed LLM response."""
-        mock_result = {}  # Missing classification
+    def test_classify_handles_invalid_response(self, classifier, sample_classify_request):
+        """Test classifier handles malformed LLM response with structured error."""
+        mock_result = {"_tokens_used": 100}  # Missing required fields
 
         with patch("src.engine.classifier.llm_client.complete") as mock_complete:
             mock_complete.return_value = mock_result
 
-            with pytest.raises(KeyError):
+            with pytest.raises(LLMResponseInvalidError) as exc_info:
                 classifier.classify(sample_classify_request)
+
+            # Verify the error has proper structure
+            assert exc_info.value.error_code.value == "LLM_RESPONSE_INVALID"
+            assert exc_info.value.details is not None
 
     def test_classify_out_of_office(self, classifier, sample_classify_request):
         """Test classification of out of office auto-reply."""

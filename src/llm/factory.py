@@ -57,18 +57,24 @@ class LLMProviderWithFallback:
     def fallback(self):
         """Lazy-initialize fallback provider."""
         if self._fallback is None and self.fallback_provider_name:
-            if self.fallback_provider_name == "openai":
-                self._fallback = OpenAIProvider(
-                    model=settings.openai_model,
-                    temperature=settings.openai_temperature,
-                    max_tokens=settings.openai_max_tokens,
-                )
-            elif self.fallback_provider_name == "gemini":
-                self._fallback = GeminiProvider(
-                    model=settings.gemini_model,
-                    temperature=settings.gemini_temperature,
-                    max_tokens=settings.gemini_max_tokens,
-                )
+            try:
+                if self.fallback_provider_name == "openai":
+                    self._fallback = OpenAIProvider(
+                        model=settings.openai_model,
+                        temperature=settings.openai_temperature,
+                        max_tokens=settings.openai_max_tokens,
+                    )
+                elif self.fallback_provider_name == "gemini":
+                    self._fallback = GeminiProvider(
+                        model=settings.gemini_model,
+                        temperature=settings.gemini_temperature,
+                        max_tokens=settings.gemini_max_tokens,
+                    )
+            except ValueError as e:
+                # API key not configured - disable fallback gracefully
+                logger.warning("Fallback provider unavailable: %s", e)
+                self.fallback_provider_name = None  # Disable fallback
+                return None
         return self._fallback
 
     @property

@@ -7,9 +7,13 @@ touch_cap, cooling_off, dispute_active, hardship, unsubscribe, escalation_approp
 import logging
 from datetime import datetime, timezone
 
+from pydantic import ValidationError
+
+from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import EvaluateGatesRequest
 from src.api.models.responses import EvaluateGatesResponse, GateResult
 from src.llm.client import llm_client
+from src.llm.schemas import GateEvaluationLLMResponse
 from src.prompts import EVALUATE_GATES_SYSTEM, EVALUATE_GATES_USER
 
 logger = logging.getLogger(__name__)
@@ -62,30 +66,41 @@ class GateEvaluator:
         )
 
         # Call LLM with very low temperature for consistent evaluation
-        result = llm_client.complete(
+        raw_result = llm_client.complete(
             system_prompt=EVALUATE_GATES_SYSTEM, user_prompt=user_prompt, temperature=0.1
         )
 
-        # Parse gate results
+        # Validate LLM response using Pydantic schema
+        tokens_used = raw_result.pop("_tokens_used", None)
+        try:
+            result = GateEvaluationLLMResponse(**raw_result)
+        except ValidationError as e:
+            logger.error(f"LLM response validation failed: {e}")
+            raise LLMResponseInvalidError(
+                message="LLM returned invalid gate evaluation response",
+                details={"validation_errors": e.errors(), "raw_response": raw_result},
+            )
+
+        # Convert validated gate results to response model
         gate_results = {}
-        for gate_name, gate_data in result.get("gate_results", {}).items():
+        for gate_name, gate_data in result.gate_results.items():
             gate_results[gate_name] = GateResult(
-                passed=gate_data["passed"],
-                reason=gate_data["reason"],
-                current_value=gate_data.get("current_value"),
-                threshold=gate_data.get("threshold"),
+                passed=gate_data.passed,
+                reason=gate_data.reason,
+                current_value=gate_data.current_value,
+                threshold=gate_data.threshold,
             )
 
         logger.info(
             f"Evaluated gates for {request.context.party.customer_code}: "
-            f"action={request.proposed_action}, allowed={result['allowed']}"
+            f"action={request.proposed_action}, allowed={result.allowed}"
         )
 
         return EvaluateGatesResponse(
-            allowed=result["allowed"],
+            allowed=result.allowed,
             gate_results=gate_results,
-            recommended_action=result.get("recommended_action"),
-            tokens_used=result.get("_tokens_used"),
+            recommended_action=result.recommended_action,
+            tokens_used=tokens_used,
         )
 
 

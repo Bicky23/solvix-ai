@@ -1,46 +1,126 @@
-"""Unit tests for LLMClient."""
-from unittest.mock import MagicMock, patch
+"""Unit tests for LLMClient wrapper."""
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.llm.client import LLMClient
+from src.llm.base import LLMResponse
 
 
 class TestLLMClient:
-    """Tests for LLMClient."""
+    """Tests for LLMClient backwards-compatibility wrapper."""
 
     @pytest.fixture
-    def llm_client(self):
-        """Create LLMClient instance."""
-        with patch("src.llm.client.OpenAI"):  # Mock OpenAI constructor
+    def mock_llm_provider(self):
+        """Create a mock LLM provider."""
+        mock_provider = MagicMock()
+        mock_provider.complete = AsyncMock()
+        return mock_provider
+
+    @pytest.fixture
+    def llm_client(self, mock_llm_provider):
+        """Create LLMClient instance with mocked provider."""
+        with patch("src.llm.client.llm_provider", mock_llm_provider):
             client = LLMClient()
-            return client
+            client._mock_provider = mock_llm_provider  # Store for test access
+            yield client
 
-    def test_complete_retry_mechanism(self, llm_client):
-        """Test that complete retries on failure."""
-        # Mock the create method on the OpenAI client instance
-        mock_create = llm_client.client.chat.completions.create
+    def test_complete_returns_parsed_json(self, llm_client):
+        """Test that complete returns parsed JSON with token count."""
+        # Setup mock response
+        mock_response = LLMResponse(
+            content='{"classification": "PROMISE_TO_PAY", "confidence": 0.95}',
+            model="gemini-3-flash-preview",
+            provider="gemini",
+            usage={"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+        )
+        llm_client._mock_provider.complete.return_value = mock_response
 
-        # Configure mock to raise exception twice then return success
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"test": "success"}'
-        mock_response.usage.total_tokens = 10
+        result = llm_client.complete(
+            system_prompt="You are a classifier",
+            user_prompt="Classify this email",
+        )
 
-        # APIConnectionError requires 'request' arg in recent versions or message?
-        # OpenAI exceptions usually need args.
-        # Let's use a generic Exception or specific one if tenacity is configured to catch it.
-        # tenacity defaults to retrying on all Exceptions unless configured?
-        # The code: @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-        # It doesn't specify 'retry' arg, so it retries on all exceptions.
+        assert result["classification"] == "PROMISE_TO_PAY"
+        assert result["confidence"] == 0.95
+        assert result["_tokens_used"] == 70
 
-        mock_create.side_effect = [
-            Exception("Connection error"),
-            Exception("Timeout"),
-            mock_response,
-        ]
+    def test_complete_handles_markdown_json(self, llm_client):
+        """Test that complete strips markdown code blocks from JSON."""
+        # Some LLMs wrap JSON in markdown code blocks
+        mock_response = LLMResponse(
+            content='```json\n{"subject": "Test", "body": "Hello"}\n```',
+            model="gemini-3-flash-preview",
+            provider="gemini",
+            usage={"prompt_tokens": 30, "completion_tokens": 15, "total_tokens": 45},
+        )
+        llm_client._mock_provider.complete.return_value = mock_response
 
-        result = llm_client.complete(system_prompt="sys", user_prompt="user")
+        result = llm_client.complete(
+            system_prompt="Generate email",
+            user_prompt="Write a test email",
+        )
 
-        assert result["test"] == "success"
-        assert mock_create.call_count == 3
+        assert result["subject"] == "Test"
+        assert result["body"] == "Hello"
+        assert result["_tokens_used"] == 45
+
+    def test_complete_non_json_response(self, llm_client):
+        """Test complete with json_response=False returns raw content."""
+        mock_response = LLMResponse(
+            content="This is a plain text response",
+            model="gemini-3-flash-preview",
+            provider="gemini",
+            usage={"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+        )
+        llm_client._mock_provider.complete.return_value = mock_response
+
+        result = llm_client.complete(
+            system_prompt="Summarize",
+            user_prompt="Summarize this text",
+            json_response=False,
+        )
+
+        assert result["content"] == "This is a plain text response"
+        assert result["_tokens_used"] == 30
+
+    def test_complete_passes_parameters_to_provider(self, llm_client):
+        """Test that temperature and max_tokens are passed to provider."""
+        mock_response = LLMResponse(
+            content='{"result": "ok"}',
+            model="gemini-3-flash-preview",
+            provider="gemini",
+            usage={"total_tokens": 25},
+        )
+        llm_client._mock_provider.complete.return_value = mock_response
+
+        llm_client.complete(
+            system_prompt="Test",
+            user_prompt="Test prompt",
+            temperature=0.5,
+            max_tokens=1000,
+        )
+
+        # Verify provider was called with correct parameters
+        call_kwargs = llm_client._mock_provider.complete.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.5
+        assert call_kwargs["max_tokens"] == 1000
+        assert call_kwargs["json_mode"] is True
+
+    def test_complete_raises_on_invalid_json(self, llm_client):
+        """Test that complete raises JSONDecodeError on invalid JSON."""
+        mock_response = LLMResponse(
+            content="This is not valid JSON {broken",
+            model="gemini-3-flash-preview",
+            provider="gemini",
+            usage={"total_tokens": 20},
+        )
+        llm_client._mock_provider.complete.return_value = mock_response
+
+        import json
+        with pytest.raises(json.JSONDecodeError):
+            llm_client.complete(
+                system_prompt="Test",
+                user_prompt="Test prompt",
+                json_response=True,
+            )

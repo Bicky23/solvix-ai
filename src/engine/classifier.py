@@ -6,10 +6,15 @@ INSOLVENCY, DISPUTE, ALREADY_PAID, UNSUBSCRIBE, HOSTILE, PROMISE_TO_PAY,
 HARDSHIP, PLAN_REQUEST, REDIRECT, REQUEST_INFO, OUT_OF_OFFICE, COOPERATIVE, UNCLEAR
 """
 import logging
+from datetime import date
 
+from pydantic import ValidationError
+
+from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import ClassifyRequest
 from src.api.models.responses import ClassifyResponse, ExtractedData
 from src.llm.client import llm_client
+from src.llm.schemas import ClassificationLLMResponse
 from src.prompts import CLASSIFY_EMAIL_SYSTEM, CLASSIFY_EMAIL_USER
 
 logger = logging.getLogger(__name__)
@@ -50,36 +55,55 @@ class EmailClassifier:
         )
 
         # Call LLM with lower temperature for classification
-        result = llm_client.complete(
+        raw_result = llm_client.complete(
             system_prompt=CLASSIFY_EMAIL_SYSTEM, user_prompt=user_prompt, temperature=0.2
         )
 
+        # Validate LLM response using Pydantic schema
+        tokens_used = raw_result.pop("_tokens_used", None)
+        try:
+            result = ClassificationLLMResponse(**raw_result)
+        except ValidationError as e:
+            logger.error(f"LLM response validation failed: {e}")
+            raise LLMResponseInvalidError(
+                message="LLM returned invalid classification response",
+                details={"validation_errors": e.errors(), "raw_response": raw_result},
+            )
+
         # Parse extracted data
         extracted = None
-        if result.get("extracted_data"):
-            extracted_raw = result["extracted_data"]
+        if result.extracted_data:
+            extracted_raw = result.extracted_data
             # Only create ExtractedData if there's actual data
-            if any(v is not None for v in extracted_raw.values()):
+            if any(v is not None for v in extracted_raw.model_dump().values()):
+                # Parse promise_date string to date if present
+                promise_date_parsed = None
+                if extracted_raw.promise_date:
+                    try:
+                        promise_date_parsed = date.fromisoformat(extracted_raw.promise_date)
+                    except ValueError:
+                        logger.warning(f"Could not parse promise_date: {extracted_raw.promise_date}")
+
                 extracted = ExtractedData(
-                    promise_date=extracted_raw.get("promise_date"),
-                    promise_amount=extracted_raw.get("promise_amount"),
-                    dispute_type=extracted_raw.get("dispute_type"),
-                    dispute_reason=extracted_raw.get("dispute_reason"),
-                    redirect_contact=extracted_raw.get("redirect_contact"),
-                    redirect_email=extracted_raw.get("redirect_email"),
+                    promise_date=promise_date_parsed,
+                    promise_amount=extracted_raw.promise_amount,
+                    dispute_type=extracted_raw.dispute_type,
+                    dispute_reason=extracted_raw.dispute_reason,
+                    redirect_contact=extracted_raw.redirect_contact,
+                    redirect_email=extracted_raw.redirect_email,
                 )
 
         logger.info(
             f"Classified email for {request.context.party.customer_code}: "
-            f"{result['classification']} (confidence: {result['confidence']:.2f})"
+            f"{result.classification} (confidence: {result.confidence:.2f})"
         )
 
         return ClassifyResponse(
-            classification=result["classification"],
-            confidence=result["confidence"],
-            reasoning=result.get("reasoning"),
+            classification=result.classification,
+            confidence=result.confidence,
+            reasoning=result.reasoning,
             extracted_data=extracted,
-            tokens_used=result.get("_tokens_used"),
+            tokens_used=tokens_used,
         )
 
 

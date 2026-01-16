@@ -9,9 +9,12 @@ Main entry point for the AI Engine service providing:
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from src.api.errors import ErrorResponse, SolvixBaseError, ErrorCode
+from src.api.middleware import RequestIDMiddleware, get_request_id
 from src.api.routes import classify, gates, generate, health
 from src.config.settings import settings
 
@@ -43,14 +46,55 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Request ID middleware (must be added first to capture all requests)
+app.add_middleware(RequestIDMiddleware)
+
+# CORS middleware - configured via settings
+cors_origins = settings.get_cors_origins()
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    logger.info(f"CORS enabled for origins: {cors_origins}")
+else:
+    logger.warning("CORS disabled - no origins configured and not in debug mode")
+
+
+# Global exception handler for structured error responses
+@app.exception_handler(SolvixBaseError)
+async def solvix_error_handler(request: Request, exc: SolvixBaseError) -> JSONResponse:
+    """Handle all Solvix custom exceptions with structured response."""
+    error_response = ErrorResponse(
+        error=exc.message,
+        error_code=exc.error_code,
+        details=exc.details,
+        request_id=get_request_id(),
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response.model_dump(mode="json"),
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Handle unexpected exceptions with structured response."""
+    logger.exception(f"Unhandled exception: {exc}")
+    error_response = ErrorResponse(
+        error="An unexpected error occurred",
+        error_code=ErrorCode.INTERNAL_ERROR,
+        details={"exception_type": type(exc).__name__} if settings.debug else None,
+        request_id=get_request_id(),
+    )
+    return JSONResponse(
+        status_code=500,
+        content=error_response.model_dump(mode="json"),
+    )
+
 
 # Include routers
 app.include_router(health.router, tags=["Health"])

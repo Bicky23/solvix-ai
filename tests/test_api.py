@@ -17,13 +17,21 @@ class TestHealthEndpoint:
     """Tests for health check endpoint."""
 
     def test_health_check(self, client):
-        """Test health endpoint returns OK."""
+        """Test health endpoint returns valid response.
+
+        Note: Status may be 'healthy' or 'degraded' depending on
+        LLM provider availability (rate limits, API keys, etc.).
+        """
         response = client.get("/health")
 
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "healthy"
+        # Status can be healthy or degraded depending on LLM availability
+        assert data["status"] in ["healthy", "degraded"]
         assert "version" in data
+        assert "provider" in data
+        assert "model" in data
+        assert "uptime_seconds" in data
 
 
 class TestClassifyEndpoint:

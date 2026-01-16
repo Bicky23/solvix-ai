@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import List, Optional
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -11,6 +11,31 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8001
     debug: bool = False
+
+    # CORS - Allowed origins for cross-origin requests
+    # In production, set this to your actual frontend domains
+    # Example: "https://app.solvix.com,https://admin.solvix.com"
+    cors_allowed_origins: str = ""  # Comma-separated list, empty = allow all in debug mode
+
+    @field_validator("cors_allowed_origins")
+    @classmethod
+    def parse_cors_origins(cls, v: str) -> str:
+        # Just validate it's a string, parsing happens in get_cors_origins()
+        return v
+
+    def get_cors_origins(self) -> List[str]:
+        """
+        Get list of allowed CORS origins.
+
+        Returns:
+            List of allowed origins. If empty and debug=True, allows all origins.
+            If empty and debug=False, returns empty list (no CORS allowed).
+        """
+        if not self.cors_allowed_origins:
+            if self.debug:
+                return ["*"]  # Allow all in debug mode only
+            return []  # No CORS in production without explicit config
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
     # LLM Provider Selection
     llm_provider: str = "gemini"  # "openai" or "gemini"

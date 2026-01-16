@@ -6,9 +6,13 @@ friendly_reminder, professional, firm, final_notice, concerned_inquiry
 """
 import logging
 
+from pydantic import ValidationError
+
+from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import GenerateDraftRequest
 from src.api.models.responses import GenerateDraftResponse
 from src.llm.client import llm_client
+from src.llm.schemas import DraftGenerationLLMResponse
 from src.prompts import GENERATE_DRAFT_SYSTEM, GENERATE_DRAFT_USER
 
 logger = logging.getLogger(__name__)
@@ -93,15 +97,26 @@ class DraftGenerator:
         )
 
         # Call LLM with higher temperature for creative generation
-        result = llm_client.complete(
+        raw_result = llm_client.complete(
             system_prompt=GENERATE_DRAFT_SYSTEM, user_prompt=user_prompt, temperature=0.7
         )
+
+        # Validate LLM response using Pydantic schema
+        tokens_used = raw_result.pop("_tokens_used", None)
+        try:
+            result = DraftGenerationLLMResponse(**raw_result)
+        except ValidationError as e:
+            logger.error(f"LLM response validation failed: {e}")
+            raise LLMResponseInvalidError(
+                message="LLM returned invalid draft generation response",
+                details={"validation_errors": e.errors(), "raw_response": raw_result},
+            )
 
         # Extract referenced invoices from generated body
         invoices_referenced = [
             o.invoice_number
             for o in request.context.obligations
-            if o.invoice_number in result.get("body", "")
+            if o.invoice_number in result.body
         ]
 
         logger.info(
@@ -110,11 +125,11 @@ class DraftGenerator:
         )
 
         return GenerateDraftResponse(
-            subject=result["subject"],
-            body=result["body"],
+            subject=result.subject,
+            body=result.body,
             tone_used=request.tone,
             invoices_referenced=invoices_referenced,
-            tokens_used=result.get("_tokens_used"),
+            tokens_used=tokens_used,
         )
 
 

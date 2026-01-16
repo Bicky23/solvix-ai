@@ -14,6 +14,30 @@ from .factory import llm_client as llm_provider
 logger = logging.getLogger(__name__)
 
 
+def _run_async(coro):
+    """
+    Run an async coroutine from synchronous code.
+
+    Uses asyncio.run() for clean execution without deprecation warnings.
+    Handles the case where an event loop is already running by using
+    a new thread with its own event loop.
+    """
+    try:
+        # Check if there's already a running event loop
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop - use asyncio.run() (cleanest approach)
+        return asyncio.run(coro)
+
+    # There's already a running loop (e.g., in FastAPI async context)
+    # We need to run in a separate thread to avoid blocking
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(asyncio.run, coro)
+        return future.result()
+
+
 class LLMClient:
     """
     Backwards-compatible wrapper for the new provider system.
@@ -44,14 +68,7 @@ class LLMClient:
             Parsed response dict with _tokens_used field
         """
         # Call the async provider (LangChain-based)
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If we're already in an async context, use the current loop
-            import nest_asyncio
-
-            nest_asyncio.apply()
-
-        response = loop.run_until_complete(
+        response = _run_async(
             llm_provider.complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
