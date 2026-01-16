@@ -1,10 +1,12 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel
 
 
 class EmailContent(BaseModel):
     """Email content for classification."""
+
     subject: str
     body: str
     from_address: str
@@ -14,6 +16,7 @@ class EmailContent(BaseModel):
 
 class PartyInfo(BaseModel):
     """Party (debtor) information."""
+
     party_id: str
     customer_code: str
     name: str
@@ -25,6 +28,7 @@ class PartyInfo(BaseModel):
 
 class BehaviorInfo(BaseModel):
     """Historical payment behavior."""
+
     lifetime_value: Optional[float] = None
     avg_days_to_pay: Optional[float] = None
     on_time_rate: Optional[float] = None
@@ -34,6 +38,7 @@ class BehaviorInfo(BaseModel):
 
 class ObligationInfo(BaseModel):
     """Single invoice/obligation."""
+
     invoice_number: str
     original_amount: float
     amount_due: float
@@ -44,6 +49,7 @@ class ObligationInfo(BaseModel):
 
 class CommunicationInfo(BaseModel):
     """Communication history summary."""
+
     touch_count: int = 0
     last_touch_at: Optional[datetime] = None
     last_touch_channel: Optional[str] = None
@@ -55,6 +61,7 @@ class CommunicationInfo(BaseModel):
 
 class TouchHistory(BaseModel):
     """Single touch record."""
+
     sent_at: datetime
     tone: str
     sender_level: int
@@ -63,6 +70,7 @@ class TouchHistory(BaseModel):
 
 class PromiseHistory(BaseModel):
     """Single promise record."""
+
     promise_date: str
     promise_amount: Optional[float] = None
     outcome: str  # kept, broken, pending
@@ -70,25 +78,26 @@ class PromiseHistory(BaseModel):
 
 class CaseContext(BaseModel):
     """Full case context for AI operations."""
+
     party: PartyInfo
     behavior: Optional[BehaviorInfo] = None
     obligations: List[ObligationInfo] = []
     communication: Optional[CommunicationInfo] = None
     recent_touches: List[TouchHistory] = []
     promises: List[PromiseHistory] = []
-    
+
     # Case state
     case_state: Optional[str] = None
     days_in_state: Optional[int] = None
     broken_promises_count: int = 0
     active_dispute: bool = False
     hardship_indicated: bool = False
-    
+
     # Tenant settings
     brand_tone: str = "professional"
     touch_cap: int = 10
     touch_interval_days: int = 3
-    
+
     # Promise verification settings
     # This is the effective value (party override or org default)
     promise_grace_days: int = 3
@@ -96,12 +105,14 @@ class CaseContext(BaseModel):
 
 class ClassifyRequest(BaseModel):
     """Request to classify an inbound email."""
+
     email: EmailContent
     context: CaseContext
 
 
 class GenerateDraftRequest(BaseModel):
     """Request to generate a collection email draft."""
+
     context: CaseContext
     tone: str = "professional"  # friendly_reminder, professional, firm, final_notice
     objective: Optional[str] = None  # follow_up, promise_reminder, escalation
@@ -110,6 +121,7 @@ class GenerateDraftRequest(BaseModel):
 
 class EvaluateGatesRequest(BaseModel):
     """Request to evaluate gates before taking action."""
+
     context: CaseContext
     proposed_action: str  # send_email, create_case, escalate, close_case
     proposed_tone: Optional[str] = None

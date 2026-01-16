@@ -1,18 +1,19 @@
 """Shared test fixtures for Solvix AI Engine tests."""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from src.api.models.requests import (
-    EmailContent,
-    PartyInfo,
     BehaviorInfo,
-    ObligationInfo,
-    CommunicationInfo,
-    TouchHistory,
     CaseContext,
     ClassifyRequest,
-    GenerateDraftRequest,
+    CommunicationInfo,
+    EmailContent,
     EvaluateGatesRequest,
+    GenerateDraftRequest,
+    ObligationInfo,
+    PartyInfo,
+    TouchHistory,
 )
 
 

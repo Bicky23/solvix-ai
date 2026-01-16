@@ -4,6 +4,7 @@ Health check API endpoint.
 GET /health - Check service health and configuration.
 """
 import time
+
 from fastapi import APIRouter
 
 from src.api.models.responses import HealthResponse
@@ -49,5 +50,5 @@ async def health_check() -> HealthResponse:
         fallback_count=llm_client.fallback_count,
         model_available=primary_healthy,
         fallback_available=fallback_status == "healthy",
-        uptime_seconds=round(uptime, 2)
+        uptime_seconds=round(uptime, 2),
     )

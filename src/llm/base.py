@@ -1,11 +1,13 @@
 """Base LLM provider abstraction."""
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from pydantic import BaseModel
 
 
 class LLMResponse(BaseModel):
     """Standardized LLM response across all providers."""
+
     content: str
     model: str
     provider: str  # "openai", "gemini", etc.
@@ -23,7 +25,7 @@ class BaseLLMProvider(ABC):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 2048,
-        json_mode: bool = False
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Generate completion from prompts."""
         pass

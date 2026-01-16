@@ -10,10 +10,20 @@ env/
 .env
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
+
+# VSCode - allow settings.json for team consistency
+.vscode/*
+!.vscode/settings.json
+
+# Security - never commit credentials
+*.pem
+*.key
+*.crt
+*credentials*.json
+*secrets*.json
 
 # Testing
 .pytest_cache/

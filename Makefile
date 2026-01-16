@@ -1,43 +1,108 @@
-.PHONY: install run dev test lint docker-build docker-run help
+.PHONY: help install run dev test test-cov test-live lint format docker-build docker-run docker-up docker-down docker-logs pre-commit-install clean
 
 help:
-	@echo "Solvix AI Engine Commands"
-	@echo "========================="
+	@echo "Solvix AI Engine Commands (uses uv)"
+	@echo "===================================="
+	@echo ""
+	@echo "Setup & Installation:"
+	@echo "  make install          - Install dependencies (uses uv)"
+	@echo "  make pre-commit-install - Install pre-commit hooks"
 	@echo ""
 	@echo "Development:"
-	@echo "  make install    - Install dependencies"
-	@echo "  make run        - Run the API server"
-	@echo "  make dev        - Run with auto-reload"
-	@echo "  make test       - Run tests"
-	@echo "  make lint       - Run linter"
+	@echo "  make run              - Run the API server"
+	@echo "  make dev              - Run with auto-reload"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test             - Run unit tests (mocked, no API calls)"
+	@echo "  make test-cov         - Run tests with coverage report"
+	@echo "  make test-live        - Run live integration tests (requires API key)"
+	@echo ""
+	@echo "Code Quality:"
+	@echo "  make lint             - Run linter (ruff)"
+	@echo "  make format           - Format code (ruff)"
+	@echo "  make clean            - Remove cache files"
 	@echo ""
 	@echo "Docker:"
-	@echo "  make docker-build  - Build Docker image"
-	@echo "  make docker-run    - Run Docker container"
+	@echo "  make docker-build     - Build Docker image"
+	@echo "  make docker-run       - Run Docker container"
+	@echo "  make docker-up        - Start with docker-compose"
+	@echo "  make docker-down      - Stop docker-compose"
+	@echo "  make docker-logs      - View docker-compose logs"
+	@echo ""
+	@echo "URLs:"
+	@echo "  API:     http://localhost:8001"
+	@echo "  Health:  http://localhost:8001/health"
+
+# =============================================================================
+# SETUP & INSTALLATION
+# =============================================================================
 
 install:
-	pip install -e ".[dev]"
+	uv sync --all-extras
+
+pre-commit-install:
+	uv run pre-commit install
+	@echo "Pre-commit hooks installed!"
+
+# =============================================================================
+# DEVELOPMENT
+# =============================================================================
 
 run:
-	uvicorn src.main:app --host 0.0.0.0 --port 8001
+	uv run uvicorn src.main:app --host 0.0.0.0 --port 8001
 
 dev:
-	uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload
+	uv run uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload
+
+# =============================================================================
+# TESTING
+# =============================================================================
 
 test:
-	pytest tests/ -v
+	uv run pytest tests/ -v --ignore=tests/test_live_integration.py
 
 test-cov:
-	pytest tests/ --cov=src --cov-report=html
+	uv run pytest tests/ --cov=src --cov-report=html --ignore=tests/test_live_integration.py
+
+test-live:
+	@echo "Running live integration tests (requires OPENAI_API_KEY or GOOGLE_API_KEY)..."
+	uv run pytest tests/test_live_integration.py -v -s
+
+# =============================================================================
+# CODE QUALITY
+# =============================================================================
 
 lint:
-	ruff check src/ tests/
+	uv run ruff check src/ tests/
 
 format:
-	ruff format src/ tests/
+	uv run ruff format src/ tests/
+	uv run ruff check --fix src/ tests/
+
+clean:
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
+	rm -rf .coverage htmlcov/ 2>/dev/null || true
+	@echo "Cleaned cache and temp files"
+
+# =============================================================================
+# DOCKER
+# =============================================================================
 
 docker-build:
-	docker build -t solvix-ai-engine .
+	docker build -t solvix-ai:latest .
 
 docker-run:
-	docker run -p 8001:8001 --env-file .env solvix-ai-engine
+	docker run -p 8001:8001 --env-file .env solvix-ai:latest
+
+docker-up:
+	docker-compose up -d
+	@echo "AI Engine started at http://localhost:8001"
+
+docker-down:
+	docker-compose down
+
+docker-logs:
+	docker-compose logs -f

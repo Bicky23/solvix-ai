@@ -4,6 +4,7 @@ Email classification API endpoint.
 POST /classify - Classify an inbound email from a debtor.
 """
 import logging
+
 from fastapi import APIRouter, HTTPException
 
 from src.api.models.requests import ClassifyRequest
@@ -18,7 +19,7 @@ router = APIRouter()
 async def classify_email(request: ClassifyRequest) -> ClassifyResponse:
     """
     Classify an inbound email from a debtor.
-    
+
     Returns classification (COOPERATIVE, PROMISE, DISPUTE, etc.),
     confidence score, and any extracted data.
     """

@@ -1,10 +1,12 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
 from datetime import date
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class ExtractedData(BaseModel):
     """Data extracted from email by AI."""
+
     promise_date: Optional[date] = None
     promise_amount: Optional[float] = None
     dispute_type: Optional[str] = None
@@ -15,6 +17,7 @@ class ExtractedData(BaseModel):
 
 class ClassifyResponse(BaseModel):
     """Response from email classification."""
+
     classification: str  # COOPERATIVE, PROMISE, DISPUTE, HOSTILE, QUERY, OUT_OF_OFFICE, UNSUBSCRIBE, OTHER
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: Optional[str] = None
@@ -24,6 +27,7 @@ class ClassifyResponse(BaseModel):
 
 class GenerateDraftResponse(BaseModel):
     """Response from draft generation."""
+
     subject: str
     body: str
     tone_used: str
@@ -33,6 +37,7 @@ class GenerateDraftResponse(BaseModel):
 
 class GateResult(BaseModel):
     """Result of a single gate evaluation."""
+
     passed: bool
     reason: str
     current_value: Optional[Any] = None
@@ -41,6 +46,7 @@ class GateResult(BaseModel):
 
 class EvaluateGatesResponse(BaseModel):
     """Response from gate evaluation."""
+
     allowed: bool
     gate_results: Dict[str, GateResult]
     recommended_action: Optional[str] = None
@@ -49,6 +55,7 @@ class EvaluateGatesResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Health check response."""
+
     status: str  # "healthy", "degraded", "unhealthy"
     version: str
     provider: str  # "gemini", "openai", etc.

@@ -4,6 +4,7 @@ Draft generation API endpoint.
 POST /generate-draft - Generate a collection email draft.
 """
 import logging
+
 from fastapi import APIRouter, HTTPException
 
 from src.api.models.requests import GenerateDraftRequest
@@ -18,7 +19,7 @@ router = APIRouter()
 async def generate_draft(request: GenerateDraftRequest) -> GenerateDraftResponse:
     """
     Generate a collection email draft.
-    
+
     Returns subject, body, and metadata about the generated draft.
     """
     try:

@@ -4,6 +4,7 @@ Gate evaluation API endpoint.
 POST /evaluate-gates - Evaluate gates before allowing a collection action.
 """
 import logging
+
 from fastapi import APIRouter, HTTPException
 
 from src.api.models.requests import EvaluateGatesRequest
@@ -18,7 +19,7 @@ router = APIRouter()
 async def evaluate_gates(request: EvaluateGatesRequest) -> EvaluateGatesResponse:
     """
     Evaluate gates before allowing a collection action.
-    
+
     Returns whether action is allowed and individual gate results.
     """
     try:

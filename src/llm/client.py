@@ -4,10 +4,10 @@ Backwards compatibility wrapper for existing code.
 This module provides an adapter that wraps the new LangChain-based
 provider system with the old synchronous dict-based interface.
 """
+import asyncio
 import json
 import logging
-import asyncio
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 from .factory import llm_client as llm_provider
 
@@ -28,7 +28,7 @@ class LLMClient:
         user_prompt: str,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        json_response: bool = True
+        json_response: bool = True,
     ) -> Dict[str, Any]:
         """
         Make a completion request using the configured LLM provider.
@@ -48,6 +48,7 @@ class LLMClient:
         if loop.is_running():
             # If we're already in an async context, use the current loop
             import nest_asyncio
+
             nest_asyncio.apply()
 
         response = loop.run_until_complete(
@@ -56,7 +57,7 @@ class LLMClient:
                 user_prompt=user_prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                json_mode=json_response
+                json_mode=json_response,
             )
         )
 

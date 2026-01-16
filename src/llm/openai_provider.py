@@ -1,10 +1,11 @@
 """OpenAI LLM provider using LangChain."""
-import os
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
+
+from src.config.settings import settings
 
 from .base import BaseLLMProvider, LLMResponse
 
@@ -17,17 +18,17 @@ class OpenAIProvider(BaseLLMProvider):
     def __init__(
         self,
         api_key: str = None,
-        model: str = "gpt-5-nano",
-        temperature: float = 0.3,
-        max_tokens: int = 2000
+        model: str = None,
+        temperature: float = None,
+        max_tokens: int = None,
     ):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self._model = model
-        self._temperature = temperature
-        self._max_tokens = max_tokens
+        self.api_key = api_key or settings.openai_api_key
+        self._model = model or settings.openai_model
+        self._temperature = temperature if temperature is not None else settings.openai_temperature
+        self._max_tokens = max_tokens if max_tokens is not None else settings.openai_max_tokens
 
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY not provided")
+            raise ValueError("OPENAI_API_KEY not provided (set via environment or .env file)")
 
         # LangChain handles all OpenAI API complexity
         self.client = ChatOpenAI(
@@ -53,7 +54,7 @@ class OpenAIProvider(BaseLLMProvider):
         user_prompt: str,
         temperature: float = None,
         max_tokens: int = None,
-        json_mode: bool = False
+        json_mode: bool = False,
     ) -> LLMResponse:
         """
         Generate completion using OpenAI via LangChain.
@@ -66,10 +67,7 @@ class OpenAIProvider(BaseLLMProvider):
         """
         try:
             # Build messages
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=user_prompt)
-            ]
+            messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
 
             # Create client with appropriate settings
             client_kwargs = {
@@ -93,9 +91,15 @@ class OpenAIProvider(BaseLLMProvider):
 
             # Extract usage metadata (LangChain standardizes this)
             usage = {
-                "prompt_tokens": response.usage_metadata.get("input_tokens", 0) if response.usage_metadata else 0,
-                "completion_tokens": response.usage_metadata.get("output_tokens", 0) if response.usage_metadata else 0,
-                "total_tokens": response.usage_metadata.get("total_tokens", 0) if response.usage_metadata else 0,
+                "prompt_tokens": response.usage_metadata.get("input_tokens", 0)
+                if response.usage_metadata
+                else 0,
+                "completion_tokens": response.usage_metadata.get("output_tokens", 0)
+                if response.usage_metadata
+                else 0,
+                "total_tokens": response.usage_metadata.get("total_tokens", 0)
+                if response.usage_metadata
+                else 0,
             }
 
             logger.debug(f"OpenAI response: tokens={usage['total_tokens']}")
@@ -105,7 +109,9 @@ class OpenAIProvider(BaseLLMProvider):
                 model=self._model,
                 provider="openai",
                 usage=usage,
-                raw_response={"response_metadata": response.response_metadata} if hasattr(response, 'response_metadata') else None
+                raw_response={"response_metadata": response.response_metadata}
+                if hasattr(response, "response_metadata")
+                else None,
             )
 
         except Exception as e:
@@ -118,13 +124,13 @@ class OpenAIProvider(BaseLLMProvider):
             response = await self.complete(
                 system_prompt="You are a test assistant.",
                 user_prompt="Reply with 'OK'",
-                max_tokens=10
+                max_tokens=10,
             )
             return {
                 "status": "healthy",
                 "provider": "openai",
                 "model": self._model,
-                "test_response": response.content[:20]
+                "test_response": response.content[:20],
             }
         except Exception as e:
             logger.error(f"OpenAI health check failed: {e}")
@@ -132,5 +138,5 @@ class OpenAIProvider(BaseLLMProvider):
                 "status": "unhealthy",
                 "provider": "openai",
                 "model": self._model,
-                "error": str(e)
+                "error": str(e),
             }

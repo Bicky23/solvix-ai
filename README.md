@@ -2,20 +2,28 @@
 
 Stateless AI service for the Solvix debt collection platform. Provides email classification, response draft generation, and gate evaluation for automated collections workflows.
 
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com/)
+[![uv](https://img.shields.io/badge/uv-package%20manager-blueviolet.svg)](https://github.com/astral-sh/uv)
+
+---
+
 ## Features
 
 - **Email Classification**: Classify inbound customer emails into categories (HARDSHIP, DISPUTE, PROMISE_TO_PAY, etc.)
 - **Draft Generation**: Generate contextual response drafts with appropriate tone
 - **Gate Evaluation**: Evaluate compliance gates before outbound actions (touch cap, cooling off, etc.)
+- **Dual LLM Support**: Primary Gemini, fallback to OpenAI
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Solvix Backend │────▶│  Solvix AI Engine │────▶│   OpenAI    │
-│   (Django)      │◀────│   (FastAPI)       │◀────│  Model via  │
-│                 │     │                  │     │  OPENAI_MODEL│
-└─────────────────┘     └──────────────────┘     └─────────────┘
+│  Solvix Backend │────▶│  Solvix AI Engine │────▶│   Gemini    │
+│   (Django)      │◀────│   (FastAPI)       │◀────│  (Primary)  │
+│                 │     │   Port 8001       │     │   OpenAI    │
+└─────────────────┘     └──────────────────┘     │  (Fallback) │
+                                                  └─────────────┘
 ```
 
 The AI Engine is stateless - it receives all context via HTTP requests and does not access the database directly.
@@ -29,49 +37,89 @@ The AI Engine is stateless - it receives all context via HTTP requests and does 
 | `/generate-draft` | POST | Generate response draft |
 | `/evaluate-gates` | POST | Evaluate compliance gates |
 
+---
+
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.11+
-- OpenAI API key
+- [uv](https://github.com/astral-sh/uv) (fast Python package manager)
+- Google API key (Gemini) or OpenAI API key
 
-### Local Development
+### Local Development (uv - Recommended)
 
 ```bash
 # Clone and setup
 cd solvix-ai
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+
+# Install dependencies with uv
+make install
 
 # Configure environment
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+# Edit .env and add your GOOGLE_API_KEY or OPENAI_API_KEY
 
-# Run the server
-uvicorn src.main:app --reload --port 8001
+# Run the server with auto-reload
+make dev
+# API: http://localhost:8001
+# Health: http://localhost:8001/health
 ```
 
 ### Docker
 
 ```bash
 # Build and run
-docker-compose up --build
+make docker-build
+make docker-run
 
-# Or just build
-docker build -t solvix-ai .
-docker run -p 8001:8001 --env-file .env solvix-ai
+# Or with docker-compose
+make docker-up
+make docker-logs   # View logs
+make docker-down   # Stop
 ```
+
+---
+
+## Makefile Commands
+
+```bash
+# Setup
+make install          # Install dependencies (uv)
+make pre-commit-install  # Install pre-commit hooks
+
+# Development
+make run              # Run server
+make dev              # Run with auto-reload
+
+# Testing
+make test             # Run unit tests (mocked, no API calls)
+make test-cov         # Run with coverage report
+make test-live        # Run live integration tests (requires API key)
+
+# Code Quality
+make lint             # Run ruff linter
+make format           # Format code
+make clean            # Remove cache files
+
+# Docker
+make docker-build     # Build image
+make docker-run       # Run container
+make docker-up        # Start with docker-compose
+make docker-down      # Stop docker-compose
+```
+
+---
 
 ## Configuration
 
-Environment variables:
+Environment variables (in `.env`):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key | Required |
-| `OPENAI_MODEL` | Model to use | `gpt-4o` |
+| `GOOGLE_API_KEY` | Google Gemini API key | Primary LLM |
+| `OPENAI_API_KEY` | OpenAI API key | Fallback LLM |
+| `OPENAI_MODEL` | OpenAI model to use | `gpt-4o` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 
 ## Classification Categories

@@ -1,11 +1,11 @@
 from .classifier import EmailClassifier, classifier
-from .generator import DraftGenerator, generator
 from .gate_evaluator import GateEvaluator, gate_evaluator
+from .generator import DraftGenerator, generator
 
 __all__ = [
     "EmailClassifier",
     "classifier",
-    "DraftGenerator", 
+    "DraftGenerator",
     "generator",
     "GateEvaluator",
     "gate_evaluator",

@@ -1,22 +1,22 @@
 from .requests import (
-    EmailContent,
-    PartyInfo,
     BehaviorInfo,
-    ObligationInfo,
-    CommunicationInfo,
-    TouchHistory,
-    PromiseHistory,
     CaseContext,
     ClassifyRequest,
-    GenerateDraftRequest,
+    CommunicationInfo,
+    EmailContent,
     EvaluateGatesRequest,
+    GenerateDraftRequest,
+    ObligationInfo,
+    PartyInfo,
+    PromiseHistory,
+    TouchHistory,
 )
 from .responses import (
-    ExtractedData,
     ClassifyResponse,
-    GenerateDraftResponse,
-    GateResult,
     EvaluateGatesResponse,
+    ExtractedData,
+    GateResult,
+    GenerateDraftResponse,
     HealthResponse,
 )
 
