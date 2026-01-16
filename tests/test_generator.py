@@ -1,10 +1,22 @@
 """Unit tests for DraftGenerator."""
-from unittest.mock import patch
+import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.api.models.responses import GenerateDraftResponse
 from src.engine.generator import DraftGenerator
+from src.llm.base import LLMResponse
+
+
+def _make_llm_response(content: dict, tokens: int = 100) -> LLMResponse:
+    """Helper to create mock LLMResponse objects."""
+    return LLMResponse(
+        content=json.dumps(content),
+        model="test-model",
+        provider="test",
+        usage={"total_tokens": tokens},
+    )
 
 
 class TestDraftGenerator:
@@ -15,21 +27,21 @@ class TestDraftGenerator:
         """Create generator instance."""
         return DraftGenerator()
 
-    def test_generate_draft_referencing_invoices(self, generator, sample_generate_draft_request):
+    @pytest.mark.asyncio
+    async def test_generate_draft_referencing_invoices(self, generator, sample_generate_draft_request):
         """Test draft generation references specific invoices."""
         sample_generate_draft_request.tone = "firm"
 
         # Mock LLM response containing invoice numbers
-        mock_result = {
+        mock_response = _make_llm_response({
             "subject": "Overdue Invoices",
             "body": "Dear Customer, Please pay invoice INV-12345 immediately. INV-12346 is also overdue.",
-            "_tokens_used": 150,
-        }
+        }, tokens=150)
 
-        with patch("src.engine.generator.llm_client.complete") as mock_complete:
-            mock_complete.return_value = mock_result
+        with patch("src.engine.generator.llm_client.complete", new_callable=AsyncMock) as mock_complete:
+            mock_complete.return_value = mock_response
 
-            result = generator.generate(sample_generate_draft_request)
+            result = await generator.generate(sample_generate_draft_request)
 
             assert isinstance(result, GenerateDraftResponse)
             assert result.tone_used == "firm"
@@ -37,36 +49,36 @@ class TestDraftGenerator:
             assert "INV-12345" in result.invoices_referenced
             assert "INV-12346" in result.invoices_referenced
 
-    def test_generate_draft_different_tones(self, generator, sample_generate_draft_request):
+    @pytest.mark.asyncio
+    async def test_generate_draft_different_tones(self, generator, sample_generate_draft_request):
         """Test draft generation with different tones."""
         tones = ["friendly_reminder", "professional", "urgent"]
 
-        with patch("src.engine.generator.llm_client.complete") as mock_complete:
+        with patch("src.engine.generator.llm_client.complete", new_callable=AsyncMock) as mock_complete:
             for tone in tones:
                 sample_generate_draft_request.tone = tone
-                mock_complete.return_value = {
+                mock_complete.return_value = _make_llm_response({
                     "subject": f"{tone} subject",
                     "body": f"Body with {tone} tone.",
-                    "_tokens_used": 100,
-                }
+                })
 
-                result = generator.generate(sample_generate_draft_request)
+                result = await generator.generate(sample_generate_draft_request)
 
                 assert result.tone_used == tone
                 assert result.body == f"Body with {tone} tone."
 
-    def test_generate_draft_no_invoices(self, generator, sample_generate_draft_request):
+    @pytest.mark.asyncio
+    async def test_generate_draft_no_invoices(self, generator, sample_generate_draft_request):
         """Test draft generation when no invoices are referenced."""
-        mock_result = {
+        mock_response = _make_llm_response({
             "subject": "Payment Reminder",
             "body": "Dear Customer, Please contact us to discuss your account.",
-            "_tokens_used": 100,
-        }
+        })
 
-        with patch("src.engine.generator.llm_client.complete") as mock_complete:
-            mock_complete.return_value = mock_result
+        with patch("src.engine.generator.llm_client.complete", new_callable=AsyncMock) as mock_complete:
+            mock_complete.return_value = mock_response
 
-            result = generator.generate(sample_generate_draft_request)
+            result = await generator.generate(sample_generate_draft_request)
 
             assert isinstance(result, GenerateDraftResponse)
             assert len(result.invoices_referenced) == 0

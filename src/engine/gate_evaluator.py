@@ -4,6 +4,7 @@ Gate evaluation engine.
 Evaluates 6 gates before allowing collection actions based on ai_logic.md:
 touch_cap, cooling_off, dispute_active, hardship, unsubscribe, escalation_appropriate
 """
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -12,7 +13,7 @@ from pydantic import ValidationError
 from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import EvaluateGatesRequest
 from src.api.models.responses import EvaluateGatesResponse, GateResult
-from src.llm.client import llm_client
+from src.llm.factory import llm_client
 from src.llm.schemas import GateEvaluationLLMResponse
 from src.prompts import EVALUATE_GATES_SYSTEM, EVALUATE_GATES_USER
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 class GateEvaluator:
     """Evaluates gates before allowing collection actions."""
 
-    def evaluate(self, request: EvaluateGatesRequest) -> EvaluateGatesResponse:
+    async def evaluate(self, request: EvaluateGatesRequest) -> EvaluateGatesResponse:
         """
         Evaluate gates for a proposed action.
 
@@ -66,12 +67,26 @@ class GateEvaluator:
         )
 
         # Call LLM with very low temperature for consistent evaluation
-        raw_result = llm_client.complete(
-            system_prompt=EVALUATE_GATES_SYSTEM, user_prompt=user_prompt, temperature=0.1
+        response = await llm_client.complete(
+            system_prompt=EVALUATE_GATES_SYSTEM,
+            user_prompt=user_prompt,
+            temperature=0.1,
+            json_mode=True,
         )
 
+        # Parse JSON response
+        tokens_used = response.usage.get("total_tokens", 0)
+        try:
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            raw_result = json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON response: {response.content}")
+            raise LLMResponseInvalidError(
+                message="LLM returned invalid JSON",
+                details={"error": str(e), "raw_content": response.content},
+            )
+
         # Validate LLM response using Pydantic schema
-        tokens_used = raw_result.pop("_tokens_used", None)
         try:
             result = GateEvaluationLLMResponse(**raw_result)
         except ValidationError as e:

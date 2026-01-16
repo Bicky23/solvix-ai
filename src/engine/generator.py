@@ -4,6 +4,7 @@ Draft generation engine.
 Generates collection email drafts with 5 tones based on ai_logic.md:
 friendly_reminder, professional, firm, final_notice, concerned_inquiry
 """
+import json
 import logging
 
 from pydantic import ValidationError
@@ -11,7 +12,7 @@ from pydantic import ValidationError
 from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import GenerateDraftRequest
 from src.api.models.responses import GenerateDraftResponse
-from src.llm.client import llm_client
+from src.llm.factory import llm_client
 from src.llm.schemas import DraftGenerationLLMResponse
 from src.prompts import GENERATE_DRAFT_SYSTEM, GENERATE_DRAFT_USER
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 class DraftGenerator:
     """Generates collection email drafts."""
 
-    def generate(self, request: GenerateDraftRequest) -> GenerateDraftResponse:
+    async def generate(self, request: GenerateDraftRequest) -> GenerateDraftResponse:
         """
         Generate a collection email draft.
 
@@ -97,12 +98,26 @@ class DraftGenerator:
         )
 
         # Call LLM with higher temperature for creative generation
-        raw_result = llm_client.complete(
-            system_prompt=GENERATE_DRAFT_SYSTEM, user_prompt=user_prompt, temperature=0.7
+        response = await llm_client.complete(
+            system_prompt=GENERATE_DRAFT_SYSTEM,
+            user_prompt=user_prompt,
+            temperature=0.7,
+            json_mode=True,
         )
 
+        # Parse JSON response
+        tokens_used = response.usage.get("total_tokens", 0)
+        try:
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            raw_result = json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON response: {response.content}")
+            raise LLMResponseInvalidError(
+                message="LLM returned invalid JSON",
+                details={"error": str(e), "raw_content": response.content},
+            )
+
         # Validate LLM response using Pydantic schema
-        tokens_used = raw_result.pop("_tokens_used", None)
         try:
             result = DraftGenerationLLMResponse(**raw_result)
         except ValidationError as e:

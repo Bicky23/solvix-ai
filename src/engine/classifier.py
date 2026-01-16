@@ -5,6 +5,7 @@ Classifies inbound debtor emails into 13 categories based on ai_logic.md:
 INSOLVENCY, DISPUTE, ALREADY_PAID, UNSUBSCRIBE, HOSTILE, PROMISE_TO_PAY,
 HARDSHIP, PLAN_REQUEST, REDIRECT, REQUEST_INFO, OUT_OF_OFFICE, COOPERATIVE, UNCLEAR
 """
+import json
 import logging
 from datetime import date
 
@@ -13,7 +14,7 @@ from pydantic import ValidationError
 from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import ClassifyRequest
 from src.api.models.responses import ClassifyResponse, ExtractedData
-from src.llm.client import llm_client
+from src.llm.factory import llm_client
 from src.llm.schemas import ClassificationLLMResponse
 from src.prompts import CLASSIFY_EMAIL_SYSTEM, CLASSIFY_EMAIL_USER
 
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 class EmailClassifier:
     """Classifies inbound emails from debtors."""
 
-    def classify(self, request: ClassifyRequest) -> ClassifyResponse:
+    async def classify(self, request: ClassifyRequest) -> ClassifyResponse:
         """
         Classify an inbound email.
 
@@ -55,12 +56,26 @@ class EmailClassifier:
         )
 
         # Call LLM with lower temperature for classification
-        raw_result = llm_client.complete(
-            system_prompt=CLASSIFY_EMAIL_SYSTEM, user_prompt=user_prompt, temperature=0.2
+        response = await llm_client.complete(
+            system_prompt=CLASSIFY_EMAIL_SYSTEM,
+            user_prompt=user_prompt,
+            temperature=0.2,
+            json_mode=True,
         )
 
+        # Parse JSON response
+        tokens_used = response.usage.get("total_tokens", 0)
+        try:
+            content = response.content.replace("```json", "").replace("```", "").strip()
+            raw_result = json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON response: {response.content}")
+            raise LLMResponseInvalidError(
+                message="LLM returned invalid JSON",
+                details={"error": str(e), "raw_content": response.content},
+            )
+
         # Validate LLM response using Pydantic schema
-        tokens_used = raw_result.pop("_tokens_used", None)
         try:
             result = ClassificationLLMResponse(**raw_result)
         except ValidationError as e:

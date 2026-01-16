@@ -1,5 +1,5 @@
 """API integration tests for Solvix AI Engine."""
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -66,7 +66,8 @@ class TestClassifyEndpoint:
         mock_response = ClassifyResponse(
             classification="HARDSHIP", confidence=0.92, reasoning="Job loss mentioned"
         )
-        mock_classifier.classify.return_value = mock_response
+        # Use AsyncMock for the async classify method
+        mock_classifier.classify = AsyncMock(return_value=mock_response)
 
         response = client.post("/classify", json=sample_classify_request.model_dump(mode="json"))
 
@@ -95,7 +96,8 @@ class TestGenerateEndpoint:
             tone_used="concerned_inquiry",
             invoices_referenced=["INV-123"],
         )
-        mock_generator.generate.return_value = mock_response
+        # Use AsyncMock for the async generate method
+        mock_generator.generate = AsyncMock(return_value=mock_response)
 
         response = client.post(
             "/generate-draft", json=sample_generate_draft_request.model_dump(mode="json")
@@ -124,7 +126,8 @@ class TestGatesEndpoint:
         mock_response = EvaluateGatesResponse(
             allowed=True, gate_results={}, recommended_action=None
         )
-        mock_evaluator.evaluate.return_value = mock_response
+        # Use AsyncMock for the async evaluate method
+        mock_evaluator.evaluate = AsyncMock(return_value=mock_response)
 
         response = client.post(
             "/evaluate-gates", json=sample_evaluate_gates_request.model_dump(mode="json")

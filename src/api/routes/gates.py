@@ -31,6 +31,6 @@ async def evaluate_gates(request: EvaluateGatesRequest) -> EvaluateGatesResponse
     Returns whether action is allowed and individual gate results.
     """
     logger.info(f"Evaluating gates for action: {request.proposed_action}")
-    result = gate_evaluator.evaluate(request)
+    result = await gate_evaluator.evaluate(request)
     logger.info(f"Gates evaluation: allowed={result.allowed}")
     return result

@@ -31,6 +31,6 @@ async def generate_draft(request: GenerateDraftRequest) -> GenerateDraftResponse
     Returns subject, body, and metadata about the generated draft.
     """
     logger.info(f"Generating draft for party: {request.context.party.party_id}")
-    result = generator.generate(request)
+    result = await generator.generate(request)
     logger.info(f"Generated draft with tone: {result.tone_used}")
     return result

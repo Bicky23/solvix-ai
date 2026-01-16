@@ -1,10 +1,22 @@
 """Unit tests for GateEvaluator."""
-from unittest.mock import patch
+import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from src.api.models.responses import EvaluateGatesResponse
 from src.engine.gate_evaluator import GateEvaluator
+from src.llm.base import LLMResponse
+
+
+def _make_llm_response(content: dict, tokens: int = 100) -> LLMResponse:
+    """Helper to create mock LLMResponse objects."""
+    return LLMResponse(
+        content=json.dumps(content),
+        model="test-model",
+        provider="test",
+        usage={"total_tokens": tokens},
+    )
 
 
 class TestGateEvaluator:
@@ -15,13 +27,14 @@ class TestGateEvaluator:
         """Create evaluator instance."""
         return GateEvaluator()
 
-    def test_evaluate_touch_cap_exceeded(self, evaluator, sample_evaluate_gates_request):
+    @pytest.mark.asyncio
+    async def test_evaluate_touch_cap_exceeded(self, evaluator, sample_evaluate_gates_request):
         """Test blocking when touch cap is exceeded."""
         # Setup context where touch count equals cap
         sample_evaluate_gates_request.context.communication.touch_count = 10
         sample_evaluate_gates_request.context.touch_cap = 10
 
-        mock_result = {
+        mock_response = _make_llm_response({
             "allowed": False,
             "gate_results": {
                 "touch_cap": {
@@ -32,13 +45,12 @@ class TestGateEvaluator:
                 }
             },
             "recommended_action": "escalate",
-            "_tokens_used": 100,
-        }
+        })
 
-        with patch("src.engine.gate_evaluator.llm_client.complete") as mock_complete:
-            mock_complete.return_value = mock_result
+        with patch("src.engine.gate_evaluator.llm_client.complete", new_callable=AsyncMock) as mock_complete:
+            mock_complete.return_value = mock_response
 
-            result = evaluator.evaluate(sample_evaluate_gates_request)
+            result = await evaluator.evaluate(sample_evaluate_gates_request)
 
             assert isinstance(result, EvaluateGatesResponse)
             assert result.allowed is False
@@ -51,11 +63,12 @@ class TestGateEvaluator:
             # Check for values loosely as string format might vary
             assert "10" in user_prompt
 
-    def test_evaluate_active_dispute(self, evaluator, sample_evaluate_gates_request):
+    @pytest.mark.asyncio
+    async def test_evaluate_active_dispute(self, evaluator, sample_evaluate_gates_request):
         """Test blocking when there is an active dispute."""
         sample_evaluate_gates_request.context.active_dispute = True
 
-        mock_result = {
+        mock_response = _make_llm_response({
             "allowed": False,
             "gate_results": {
                 "dispute_active": {
@@ -66,13 +79,12 @@ class TestGateEvaluator:
                 }
             },
             "recommended_action": "resolve_dispute",
-            "_tokens_used": 100,
-        }
+        })
 
-        with patch("src.engine.gate_evaluator.llm_client.complete") as mock_complete:
-            mock_complete.return_value = mock_result
+        with patch("src.engine.gate_evaluator.llm_client.complete", new_callable=AsyncMock) as mock_complete:
+            mock_complete.return_value = mock_response
 
-            result = evaluator.evaluate(sample_evaluate_gates_request)
+            result = await evaluator.evaluate(sample_evaluate_gates_request)
 
             assert result.allowed is False
             assert result.gate_results["dispute_active"].passed is False
@@ -82,9 +94,10 @@ class TestGateEvaluator:
             user_prompt = call_args.kwargs["user_prompt"]
             assert "True" in user_prompt or "active_dispute" in user_prompt
 
-    def test_evaluate_allowed(self, evaluator, sample_evaluate_gates_request):
+    @pytest.mark.asyncio
+    async def test_evaluate_allowed(self, evaluator, sample_evaluate_gates_request):
         """Test allowing when all gates pass."""
-        mock_result = {
+        mock_response = _make_llm_response({
             "allowed": True,
             "gate_results": {
                 "touch_cap": {
@@ -101,13 +114,12 @@ class TestGateEvaluator:
                 },
             },
             "recommended_action": "proceed",
-            "_tokens_used": 100,
-        }
+        })
 
-        with patch("src.engine.gate_evaluator.llm_client.complete") as mock_complete:
-            mock_complete.return_value = mock_result
+        with patch("src.engine.gate_evaluator.llm_client.complete", new_callable=AsyncMock) as mock_complete:
+            mock_complete.return_value = mock_response
 
-            result = evaluator.evaluate(sample_evaluate_gates_request)
+            result = await evaluator.evaluate(sample_evaluate_gates_request)
 
             assert isinstance(result, EvaluateGatesResponse)
             assert result.allowed is True

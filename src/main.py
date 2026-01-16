@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.errors import ErrorResponse, SolvixBaseError, ErrorCode
+from src.api.errors import ErrorCode, ErrorResponse, SolvixBaseError
 from src.api.middleware import RequestIDMiddleware, get_request_id
 from src.api.routes import classify, gates, generate, health
 from src.config.settings import settings

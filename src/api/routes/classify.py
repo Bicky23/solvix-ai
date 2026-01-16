@@ -32,6 +32,6 @@ async def classify_email(request: ClassifyRequest) -> ClassifyResponse:
     confidence score, and any extracted data.
     """
     logger.info(f"Classifying email for party: {request.context.party.party_id}")
-    result = classifier.classify(request)
+    result = await classifier.classify(request)
     logger.info(f"Classification: {result.classification} ({result.confidence:.2f})")
     return result
