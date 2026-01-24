@@ -15,6 +15,17 @@ class ExtractedData(BaseModel):
     redirect_email: Optional[str] = None
 
 
+class GuardrailValidation(BaseModel):
+    """Result of guardrail validation on AI output."""
+
+    all_passed: bool = True
+    guardrails_run: int = 0
+    guardrails_passed: int = 0
+    blocking_failures: List[str] = []
+    warnings: List[str] = []
+    factual_accuracy: float = Field(ge=0.0, le=1.0, default=1.0)
+
+
 class ClassifyResponse(BaseModel):
     """Response from email classification."""
 
@@ -25,6 +36,8 @@ class ClassifyResponse(BaseModel):
     reasoning: Optional[str] = None
     extracted_data: Optional[ExtractedData] = None
     tokens_used: Optional[int] = None
+    # Guardrail validation results
+    guardrail_validation: Optional[GuardrailValidation] = None
 
 
 class GenerateDraftResponse(BaseModel):
@@ -35,6 +48,8 @@ class GenerateDraftResponse(BaseModel):
     tone_used: str
     invoices_referenced: List[str] = []
     tokens_used: Optional[int] = None
+    # Guardrail validation results
+    guardrail_validation: Optional[GuardrailValidation] = None
 
 
 class GateResult(BaseModel):

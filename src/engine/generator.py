@@ -12,7 +12,9 @@ from pydantic import ValidationError
 
 from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import GenerateDraftRequest
-from src.api.models.responses import GenerateDraftResponse
+from src.api.models.responses import GenerateDraftResponse, GuardrailValidation
+from src.guardrails.base import GuardrailSeverity
+from src.guardrails.pipeline import guardrail_pipeline
 from src.llm.factory import llm_client
 from src.llm.schemas import DraftGenerationLLMResponse
 from src.prompts import GENERATE_DRAFT_SYSTEM, GENERATE_DRAFT_USER
@@ -31,7 +33,7 @@ class DraftGenerator:
             request: Generation request with context and parameters
 
         Returns:
-            Generated draft with subject and body
+            Generated draft with subject, body, and guardrail validation
         """
         # Calculate derived values
         total_outstanding = sum(o.amount_due for o in request.context.obligations)
@@ -136,9 +138,43 @@ class DraftGenerator:
             o.invoice_number for o in request.context.obligations if o.invoice_number in result.body
         ]
 
+        # Run guardrails on generated draft body (critical for factual accuracy)
+        guardrail_result = guardrail_pipeline.validate(
+            output=result.body,
+            context=request.context,
+        )
+
+        # Calculate factual accuracy
+        total_checks = len(guardrail_result.results)
+        passed_checks = sum(1 for r in guardrail_result.results if r.passed)
+        factual_accuracy = passed_checks / total_checks if total_checks > 0 else 1.0
+
+        # Separate warnings from blocking failures
+        warnings = [
+            r.guardrail_name
+            for r in guardrail_result.results
+            if not r.passed and r.severity == GuardrailSeverity.MEDIUM
+        ]
+
+        guardrail_validation = GuardrailValidation(
+            all_passed=guardrail_result.all_passed,
+            guardrails_run=total_checks,
+            guardrails_passed=passed_checks,
+            blocking_failures=guardrail_result.blocking_guardrails,
+            warnings=warnings,
+            factual_accuracy=factual_accuracy,
+        )
+
+        if not guardrail_result.all_passed:
+            logger.warning(
+                f"Guardrails failed for draft {request.context.party.customer_code}: "
+                f"blocking={guardrail_result.blocking_guardrails}, warnings={warnings}"
+            )
+
         logger.info(
             f"Generated draft for {request.context.party.customer_code}: "
-            f"tone={request.tone}, invoices_referenced={len(invoices_referenced)}"
+            f"tone={request.tone}, invoices_referenced={len(invoices_referenced)}, "
+            f"guardrails_passed={guardrail_result.all_passed}"
         )
 
         return GenerateDraftResponse(
@@ -147,6 +183,7 @@ class DraftGenerator:
             tone_used=request.tone,
             invoices_referenced=invoices_referenced,
             tokens_used=tokens_used,
+            guardrail_validation=guardrail_validation,
         )
 
 

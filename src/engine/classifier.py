@@ -14,7 +14,9 @@ from pydantic import ValidationError
 
 from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import ClassifyRequest
-from src.api.models.responses import ClassifyResponse, ExtractedData
+from src.api.models.responses import ClassifyResponse, ExtractedData, GuardrailValidation
+from src.guardrails.base import GuardrailSeverity
+from src.guardrails.pipeline import guardrail_pipeline
 from src.llm.factory import llm_client
 from src.llm.schemas import ClassificationLLMResponse
 from src.prompts import CLASSIFY_EMAIL_SYSTEM, CLASSIFY_EMAIL_USER
@@ -33,7 +35,7 @@ class EmailClassifier:
             request: Classification request with email and context
 
         Returns:
-            Classification result with confidence and extracted data
+            Classification result with confidence, extracted data, and guardrail validation
         """
         # Calculate derived values
         total_outstanding = sum(o.amount_due for o in request.context.obligations)
@@ -113,6 +115,42 @@ class EmailClassifier:
                     redirect_email=extracted_raw.redirect_email,
                 )
 
+        # Run guardrails on LLM reasoning (validate any facts mentioned)
+        guardrail_validation = None
+        if result.reasoning:
+            guardrail_result = guardrail_pipeline.validate(
+                output=result.reasoning,
+                context=request.context,
+                extracted_data=extracted,
+            )
+
+            # Calculate factual accuracy
+            total_checks = len(guardrail_result.results)
+            passed_checks = sum(1 for r in guardrail_result.results if r.passed)
+            factual_accuracy = passed_checks / total_checks if total_checks > 0 else 1.0
+
+            # Separate warnings from blocking failures
+            warnings = [
+                r.guardrail_name
+                for r in guardrail_result.results
+                if not r.passed and r.severity == GuardrailSeverity.MEDIUM
+            ]
+
+            guardrail_validation = GuardrailValidation(
+                all_passed=guardrail_result.all_passed,
+                guardrails_run=total_checks,
+                guardrails_passed=passed_checks,
+                blocking_failures=guardrail_result.blocking_guardrails,
+                warnings=warnings,
+                factual_accuracy=factual_accuracy,
+            )
+
+            if not guardrail_result.all_passed:
+                logger.warning(
+                    f"Guardrails failed for {request.context.party.customer_code}: "
+                    f"blocking={guardrail_result.blocking_guardrails}, warnings={warnings}"
+                )
+
         logger.info(
             f"Classified email for {request.context.party.customer_code}: "
             f"{result.classification} (confidence: {result.confidence:.2f})"
@@ -124,6 +162,7 @@ class EmailClassifier:
             reasoning=result.reasoning,
             extracted_data=extracted,
             tokens_used=tokens_used,
+            guardrail_validation=guardrail_validation,
         )
 
 

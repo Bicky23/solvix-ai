@@ -8,14 +8,11 @@ import pytest
 from src.engine.classifier import classifier
 from src.engine.gate_evaluator import gate_evaluator
 from src.engine.generator import generator
-from src.llm.client import llm_client
 
 # Skip all tests in this module if no API key
 pytestmark = pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
 
-# Increase token limit for reasoning models that might need more "thinking" space
-# This is necessary because 'finish_reason=length' was observed with 2000 tokens
-llm_client.max_tokens = 10000
+# Note: max_tokens is configured in the factory/provider settings
 
 
 class TestLiveIntegration:
