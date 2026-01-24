@@ -48,10 +48,17 @@ Email Structure:
 6. Contact details for queries
 7. Professional sign-off with [SENDER_NAME] and [SENDER_TITLE] placeholders
 
+HTML Formatting Requirements:
+- Use <p> tags for paragraphs (NOT <br> tags)
+- Each paragraph should be wrapped in <p>...</p>
+- Invoice lists should use <ul> and <li> tags
+- Do NOT include <html>, <head>, or <body> tags - just the email content HTML
+- Signature should be formatted as: <p>Best regards,</p><p>[SENDER_NAME]<br>[SENDER_TITLE]</p>
+
 Respond in JSON format:
 {
   "subject": "Email subject line",
-  "body": "Full email body with proper greeting and signature placeholder"
+  "body": "HTML-formatted email body with <p> tags for paragraphs"
 }"""
 
 

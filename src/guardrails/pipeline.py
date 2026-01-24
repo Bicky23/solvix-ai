@@ -1,6 +1,8 @@
 """Guardrail Pipeline - orchestrates all guardrails."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Tuple
 
 from src.api.models.requests import CaseContext
 
@@ -15,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Default max retries for failed guardrails
 DEFAULT_MAX_RETRIES = 2
+
+# Thread pool for parallel guardrail execution (5 guardrails = 5 workers)
+_guardrail_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="guardrail")
 
 
 class GuardrailPipeline:
@@ -64,7 +69,113 @@ class GuardrailPipeline:
             ContextualCoherenceGuardrail(),
         ]
 
+    def _run_single_guardrail(
+        self,
+        guardrail: BaseGuardrail,
+        output: str,
+        context: CaseContext,
+        **kwargs,
+    ) -> Tuple[str, list[GuardrailResult], Exception | None]:
+        """
+        Run a single guardrail and return results.
+
+        Returns:
+            Tuple of (guardrail_name, results, exception_if_any)
+        """
+        try:
+            results = guardrail.validate(output, context, **kwargs)
+            return (guardrail.name, results, None)
+        except Exception as e:
+            return (guardrail.name, [], e)
+
     def validate(
+        self,
+        output: str,
+        context: CaseContext,
+        fail_fast: bool = True,
+        parallel: bool = True,
+        **kwargs,
+    ) -> GuardrailPipelineResult:
+        """
+        Run all guardrails on the output.
+
+        Args:
+            output: The AI-generated output to validate
+            context: The input context
+            fail_fast: If True, stop on first critical failure
+            parallel: If True, run guardrails in parallel (default)
+            **kwargs: Additional context (extracted_data, etc.)
+
+        Returns:
+            GuardrailPipelineResult with all validation results
+        """
+        if parallel:
+            return self._validate_parallel(output, context, **kwargs)
+        return self._validate_sequential(output, context, fail_fast, **kwargs)
+
+    def _validate_parallel(
+        self,
+        output: str,
+        context: CaseContext,
+        **kwargs,
+    ) -> GuardrailPipelineResult:
+        """
+        Run all guardrails in parallel using thread pool.
+
+        Note: fail_fast is not supported in parallel mode since all guardrails
+        run concurrently. All results are collected and evaluated together.
+        """
+        all_results: list[GuardrailResult] = []
+        blocking_guardrails: list[str] = []
+        should_block = False
+
+        # Submit all guardrails to thread pool
+        futures = {
+            _guardrail_executor.submit(
+                self._run_single_guardrail, guardrail, output, context, **kwargs
+            ): guardrail
+            for guardrail in self.guardrails
+        }
+
+        # Collect results as they complete
+        for future in as_completed(futures):
+            guardrail_name, results, exception = future.result()
+
+            if exception:
+                logger.error(f"Guardrail {guardrail_name} raised exception: {exception}")
+                all_results.append(
+                    GuardrailResult(
+                        passed=False,
+                        guardrail_name=guardrail_name,
+                        severity=GuardrailSeverity.HIGH,
+                        message=f"Guardrail execution error: {str(exception)}",
+                        details={"exception": str(exception)},
+                    )
+                )
+                should_block = True
+                blocking_guardrails.append(guardrail_name)
+            else:
+                all_results.extend(results)
+                for result in results:
+                    if result.should_block:
+                        should_block = True
+                        if guardrail_name not in blocking_guardrails:
+                            blocking_guardrails.append(guardrail_name)
+                        logger.warning(
+                            f"Guardrail {guardrail_name} BLOCKED output: {result.message}"
+                        )
+
+        all_passed = all(r.passed for r in all_results)
+
+        return GuardrailPipelineResult(
+            all_passed=all_passed,
+            should_block=should_block,
+            results=all_results,
+            retry_suggested=should_block and len(blocking_guardrails) <= 2,
+            blocking_guardrails=blocking_guardrails,
+        )
+
+    def _validate_sequential(
         self,
         output: str,
         context: CaseContext,
@@ -72,7 +183,7 @@ class GuardrailPipeline:
         **kwargs,
     ) -> GuardrailPipelineResult:
         """
-        Run all guardrails on the output.
+        Run all guardrails sequentially (original implementation).
 
         Args:
             output: The AI-generated output to validate

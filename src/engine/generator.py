@@ -5,7 +5,6 @@ Generates collection email drafts with 5 tones based on ai_logic.md:
 friendly_reminder, professional, firm, final_notice, concerned_inquiry
 """
 
-import json
 import logging
 
 from pydantic import ValidationError
@@ -18,6 +17,7 @@ from src.guardrails.pipeline import guardrail_pipeline
 from src.llm.factory import llm_client
 from src.llm.schemas import DraftGenerationLLMResponse
 from src.prompts import GENERATE_DRAFT_SYSTEM, GENERATE_DRAFT_USER
+from src.utils import JSONExtractionError, extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -111,16 +111,23 @@ class DraftGenerator:
             json_mode=True,
         )
 
-        # Parse JSON response
+        # Parse JSON response using robust extraction
         tokens_used = response.usage.get("total_tokens", 0)
         try:
-            content = response.content.replace("```json", "").replace("```", "").strip()
-            raw_result = json.loads(content)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON response: {response.content}")
+            raw_result = extract_json(response.content)
+        except JSONExtractionError as e:
+            # Log with repr() to see actual characters including non-printable ones
+            content_preview = repr(response.content[:500]) if response.content else "None"
+            logger.error(
+                f"Failed to parse JSON response (len={len(response.content) if response.content else 0}): {content_preview}"
+            )
             raise LLMResponseInvalidError(
                 message="LLM returned invalid JSON",
-                details={"error": str(e), "raw_content": response.content},
+                details={
+                    "error": str(e),
+                    "raw_content": e.raw_content[:1000] if e.raw_content else "",
+                    "extraction_attempts": e.attempts,
+                },
             )
 
         # Validate LLM response using Pydantic schema

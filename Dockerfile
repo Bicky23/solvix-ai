@@ -16,7 +16,9 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # Create non-root user early (before installing dependencies)
-RUN useradd --create-home --shell /bin/bash appuser
+# Also give appuser ownership of /app so uv can create .venv
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown appuser:appuser /app
 
 # Install system dependencies and uv (as root, then make accessible)
 RUN apt-get update && apt-get install -y --no-install-recommends \

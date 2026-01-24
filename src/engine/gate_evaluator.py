@@ -5,7 +5,6 @@ Evaluates 6 gates before allowing collection actions based on ai_logic.md:
 touch_cap, cooling_off, dispute_active, hardship, unsubscribe, escalation_appropriate
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 
@@ -17,6 +16,7 @@ from src.api.models.responses import EvaluateGatesResponse, GateResult
 from src.llm.factory import llm_client
 from src.llm.schemas import GateEvaluationLLMResponse
 from src.prompts import EVALUATE_GATES_SYSTEM, EVALUATE_GATES_USER
+from src.utils import JSONExtractionError, extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +93,23 @@ class GateEvaluator:
             json_mode=True,
         )
 
-        # Parse JSON response
+        # Parse JSON response using robust extraction
         tokens_used = response.usage.get("total_tokens", 0)
         try:
-            content = response.content.replace("```json", "").replace("```", "").strip()
-            raw_result = json.loads(content)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON response: {response.content}")
+            raw_result = extract_json(response.content)
+        except JSONExtractionError as e:
+            # Log with repr() to see actual characters including non-printable ones
+            content_preview = repr(response.content[:500]) if response.content else "None"
+            logger.error(
+                f"Failed to parse JSON response (len={len(response.content) if response.content else 0}): {content_preview}"
+            )
             raise LLMResponseInvalidError(
                 message="LLM returned invalid JSON",
-                details={"error": str(e), "raw_content": response.content},
+                details={
+                    "error": str(e),
+                    "raw_content": e.raw_content[:1000] if e.raw_content else "",
+                    "extraction_attempts": e.attempts,
+                },
             )
 
         # Validate LLM response using Pydantic schema
