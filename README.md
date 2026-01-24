@@ -13,9 +13,11 @@ Stateless AI service for the Solvix debt collection platform. Provides email cla
 ## Features
 
 - **Email Classification**: Classify inbound customer emails into categories (HARDSHIP, DISPUTE, PROMISE_TO_PAY, etc.)
-- **Draft Generation**: Generate contextual response drafts with appropriate tone
+- **Draft Generation**: Generate contextual response drafts with appropriate tone and HTML formatting
 - **Gate Evaluation**: Evaluate compliance gates before outbound actions (touch cap, cooling off, etc.)
+- **Guardrails Pipeline**: Validate AI outputs with 5 parallel guardrails (factual grounding, numerical consistency, entity verification, temporal consistency, contextual coherence)
 - **Dual LLM Support**: Primary Gemini, fallback to OpenAI
+- **Robust JSON Parsing**: Multi-strategy JSON extraction from LLM responses (handles markdown blocks, trailing commas, etc.)
 
 ## Architecture
 
@@ -161,6 +163,23 @@ Environment variables (in `.env`):
 | `unsubscribe` | Contact opted out |
 | `escalation_appropriate` | Valid escalation path |
 
+## Guardrails
+
+The guardrail pipeline validates AI-generated content before it's stored. Guardrails run in parallel using a thread pool for performance.
+
+| Guardrail | Severity | Description |
+|-----------|----------|-------------|
+| `factual_grounding` | Critical | Validates invoice numbers and amounts match context |
+| `numerical_consistency` | High | Ensures calculations are correct (totals = sum of parts) |
+| `entity_verification` | High | Verifies customer code and company name match |
+| `temporal_consistency` | Medium | Validates date references are accurate |
+| `contextual_coherence` | Low | Checks overall response coherence |
+
+**Blocking Behavior:**
+- `Critical` and `High` severity failures block the draft from being stored
+- `Medium` severity issues generate warnings but allow the draft
+- `Low` severity issues are logged only
+
 ## Case Context
 
 The `CaseContext` model (in `src/api/models/requests.py`) provides context for AI decisions:
@@ -226,20 +245,39 @@ solvix-ai/
 │   │   ├── models/          # Pydantic request/response models
 │   │   │   ├── requests.py
 │   │   │   └── responses.py
-│   │   └── routes/          # FastAPI route handlers
-│   │       ├── classify.py
-│   │       ├── generate.py
-│   │       ├── gates.py
-│   │       └── health.py
+│   │   ├── routes/          # FastAPI route handlers
+│   │   │   ├── classify.py
+│   │   │   ├── generate.py
+│   │   │   ├── gates.py
+│   │   │   └── health.py
+│   │   ├── errors.py        # Custom API exceptions
+│   │   └── middleware.py    # Request logging middleware
 │   ├── config/
 │   │   └── settings.py      # Pydantic settings
 │   ├── engine/              # Core AI logic
-│   │   ├── classifier.py
-│   │   ├── generator.py
-│   │   └── gate_evaluator.py
+│   │   ├── classifier.py    # Email classification
+│   │   ├── generator.py     # Draft generation
+│   │   └── gate_evaluator.py # Gate evaluation
+│   ├── guardrails/          # Output validation
+│   │   ├── base.py          # Base classes and result types
+│   │   ├── pipeline.py      # Parallel guardrail orchestration
+│   │   ├── factual_grounding.py  # Invoice/amount validation
+│   │   ├── numerical.py     # Calculation verification
+│   │   ├── entity.py        # Customer code/name validation
+│   │   ├── temporal.py      # Date reference validation
+│   │   └── contextual.py    # Coherence checking
 │   ├── llm/
-│   │   ├── client.py        # OpenAI client wrapper
-│   │   └── prompts.py       # System/user prompts
+│   │   ├── factory.py       # LLM client factory (Gemini/OpenAI)
+│   │   ├── gemini_provider.py
+│   │   ├── openai_provider.py
+│   │   └── schemas.py       # LLM response schemas
+│   ├── prompts/             # Prompt templates
+│   │   ├── classification.py
+│   │   ├── draft_generation.py
+│   │   └── gate_evaluation.py
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   └── json_extractor.py # Robust JSON parsing
 │   └── main.py              # FastAPI app entrypoint
 ├── tests/
 │   ├── conftest.py          # Shared fixtures
@@ -249,7 +287,6 @@ solvix-ai/
 │   └── test_gate_evaluator.py
 ├── Dockerfile
 ├── docker-compose.yml
-├── requirements.txt
 ├── pyproject.toml
 └── README.md
 ```
