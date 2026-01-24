@@ -1,0 +1,64 @@
+# =============================================================================
+# Docker Ignore for solvix-ai
+# Reduces build context size for faster builds
+# =============================================================================
+
+# Git
+.git/
+.gitignore
+
+# Virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Linting/Formatting
+.ruff_cache/
+.mypy_cache/
+
+# Environment files (secrets should not be in image)
+.env
+.env.local
+.env.*.local
+
+# Documentation
+*.md
+docs/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local development
+docker-compose.yml
+docker-compose.*.yml
+Makefile
+
+# Logs
+*.log
+logs/
+
+# Other
+.DS_Store
+Thumbs.db
+*.bak

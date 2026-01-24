@@ -1,3 +1,11 @@
+# =============================================================================
+# solvix-ai Dockerfile
+# FastAPI service for AI-powered email classification and draft generation
+# =============================================================================
+# Note: Multi-stage build NOT needed - all dependencies are pure Python
+# (no build-essential, no native extensions to compile)
+# =============================================================================
+
 FROM python:3.12-slim
 
 # Set environment variables
@@ -7,30 +15,39 @@ ENV PYTHONUNBUFFERED=1
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies and uv
-RUN apt-get update && apt-get install -y \
+# Create non-root user early (before installing dependencies)
+RUN useradd --create-home --shell /bin/bash appuser
+
+# Install system dependencies and uv (as root, then make accessible)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Add uv to PATH
-ENV PATH="/root/.local/bin:$PATH"
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && cp /root/.local/bin/uv /usr/local/bin/uv \
+    && chmod +x /usr/local/bin/uv
 
 # Copy dependency files first (for layer caching)
-COPY pyproject.toml uv.lock ./
+COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 
-# Install dependencies using uv
+# Switch to non-root user for dependency installation
+USER appuser
+
+# Install dependencies using uv (production only, no dev deps)
 RUN uv sync --no-dev --frozen
 
-# Copy source code
-COPY src/ src/
+# Copy source code (only src/ needed in production)
+COPY --chown=appuser:appuser src/ src/
 
 # Expose port
 EXPOSE 8001
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8001/health || exit 1
 
 # Run with uv
-CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# --timeout-graceful-shutdown: Allow in-flight LLM requests to complete
+CMD ["uv", "run", "uvicorn", "src.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8001", \
+     "--timeout-graceful-shutdown", "30"]

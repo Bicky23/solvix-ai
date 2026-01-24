@@ -1,19 +1,44 @@
-version: '3.8'
+# =============================================================================
+# solvix-ai Docker Compose
+# AI Engine for email classification and draft generation
+# =============================================================================
 
 services:
   ai-engine:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: solvix_ai:v1
+    container_name: solvix_ai_engine
     ports:
       - "8001:8001"
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # LLM Provider Configuration (Gemini is primary, OpenAI is fallback)
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-1.5-flash}
+      # OpenAI fallback
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
-      - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE:-0.3}
+      # LLM Settings
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.3}
+      - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
+      - LLM_TIMEOUT_SECONDS=${LLM_TIMEOUT_SECONDS:-30}
+      # Application Settings
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - DEBUG=${DEBUG:-false}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
+      start_period: 10s
       retries: 3
