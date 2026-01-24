@@ -48,11 +48,24 @@ class GateEvaluator:
         # Get behavior info
         behavior = request.context.behavior
 
+        # Check do_not_contact_until date
+        do_not_contact_active = False
+        do_not_contact_until = request.context.do_not_contact_until
+        if do_not_contact_until:
+            try:
+                hold_date = datetime.fromisoformat(do_not_contact_until)
+                # Make hold_date timezone-aware if it isn't
+                if hold_date.tzinfo is None:
+                    hold_date = hold_date.replace(tzinfo=timezone.utc)
+                do_not_contact_active = datetime.now(timezone.utc).date() < hold_date.date()
+            except ValueError:
+                logger.warning(f"Invalid do_not_contact_until date format: {do_not_contact_until}")
+
         # Build user prompt
         user_prompt = EVALUATE_GATES_USER.format(
             proposed_action=request.proposed_action,
             proposed_tone=request.proposed_tone or "not specified",
-            touch_count=comm.touch_count if comm else 0,
+            monthly_touch_count=request.context.monthly_touch_count,  # Use monthly count (resets each month)
             touch_cap=request.context.touch_cap,
             days_since_last_touch=days_since_last_touch,
             touch_interval_days=request.context.touch_interval_days,
@@ -65,6 +78,11 @@ class GateEvaluator:
             currency=request.context.party.currency,
             total_outstanding=total_outstanding,
             segment=behavior.segment if behavior else "standard",
+            # New debtor-level fields
+            do_not_contact_until=do_not_contact_until or "None",
+            do_not_contact_active=do_not_contact_active,
+            relationship_tier=request.context.relationship_tier,
+            is_verified=request.context.party.is_verified,
         )
 
         # Call LLM with very low temperature for consistent evaluation

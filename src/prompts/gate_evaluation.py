@@ -8,9 +8,10 @@ EVALUATE_GATES_SYSTEM = """You are an AI assistant evaluating whether a proposed
 
 Evaluate these gates:
 
-1. touch_cap: Has the maximum number of touches been reached?
-   - If touch_count >= touch_cap, FAIL
-   - Recommendation if failed: "Consider legal referral or write-off review"
+1. touch_cap: Has the monthly touch cap been reached?
+   - If monthly_touch_count >= touch_cap, FAIL
+   - Note: Touch count resets at the start of each month
+   - Recommendation if failed: "Monthly touch cap reached - wait until next month or consider legal referral"
 
 2. cooling_off: Has enough time passed since last contact?
    - If days_since_last_touch < touch_interval_days, FAIL
@@ -28,7 +29,17 @@ Evaluate these gates:
    - If unsubscribe_requested = TRUE, FAIL
    - Recommendation if failed: "Contact blocked - manual intervention required"
 
-6. escalation_appropriate: Is the proposed tone/action appropriate given history?
+6. do_not_contact: Is there a temporary hold on contacting this debtor?
+   - If do_not_contact_active = TRUE (meaning today < do_not_contact_until), FAIL
+   - Recommendation if failed: "Temporary hold until {do_not_contact_until} - no contact allowed"
+
+7. party_verified: Is the debtor party verified?
+   - If is_verified = FALSE, this is a WARNING not a block
+   - Party may be a placeholder created from unknown email sender
+   - Recommendation: "Verify party identity before sending - use cautious language"
+
+8. escalation_appropriate: Is the proposed tone/action appropriate given history?
+   - Consider relationship_tier when evaluating (VIP = more cautious, high_risk = more direct)
    - If proposed tone is less escalated than current situation warrants, WARNING
    - If proposed tone jumps too many levels (e.g., friendly_reminder after 3 broken promises), WARNING
 
@@ -61,7 +72,7 @@ EVALUATE_GATES_USER = """Evaluate whether this action should proceed.
 **Proposed Tone:** {proposed_tone}
 
 **Case State:**
-- Total Touches: {touch_count}
+- Monthly Touch Count: {monthly_touch_count} (resets each month)
 - Touch Cap: {touch_cap}
 - Days Since Last Touch: {days_since_last_touch}
 - Required Interval: {touch_interval_days} days
@@ -71,6 +82,12 @@ EVALUATE_GATES_USER = """Evaluate whether this action should proceed.
 - Broken Promises: {broken_promises_count}
 - Last Tone Used: {last_tone_used}
 - Case State: {case_state}
+
+**Debtor-Level Settings:**
+- Do Not Contact Until: {do_not_contact_until}
+- Do Not Contact Active: {do_not_contact_active}
+- Relationship Tier: {relationship_tier}
+- Party Verified: {is_verified}
 
 **Context:**
 - Total Outstanding: {currency} {total_outstanding:,.2f}

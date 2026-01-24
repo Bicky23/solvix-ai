@@ -50,6 +50,8 @@ class EmailClassifier:
             segment=request.context.behavior.segment if request.context.behavior else "unknown",
             active_dispute=request.context.active_dispute,
             hardship_indicated=request.context.hardship_indicated,
+            is_verified=request.context.party.is_verified,
+            party_source=request.context.party.source,
             from_name=request.email.from_name or "Unknown",
             from_address=request.email.from_address,
             subject=request.email.subject,

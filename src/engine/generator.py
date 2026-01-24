@@ -73,7 +73,10 @@ class DraftGenerator:
             customer_code=request.context.party.customer_code,
             currency=request.context.party.currency,
             total_outstanding=total_outstanding,
+            relationship_tier=request.context.relationship_tier,
+            is_verified=request.context.party.is_verified,
             invoices_list=invoices_list,
+            monthly_touch_count=request.context.monthly_touch_count,
             touch_count=comm.touch_count if comm else 0,
             last_touch_at=comm.last_touch_at.strftime("%Y-%m-%d")
             if comm and comm.last_touch_at

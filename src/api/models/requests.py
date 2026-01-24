@@ -25,6 +25,16 @@ class PartyInfo(BaseModel):
     credit_limit: Optional[float] = None
     on_hold: bool = False
 
+    # Debtor-level override fields (NEW)
+    relationship_tier: str = "standard"  # vip, standard, high_risk
+    tone_override: Optional[str] = None  # friendly, professional, firm (overrides brand_tone)
+    grace_days_override: Optional[int] = None  # Overrides tenant grace_days
+    touch_cap_override: Optional[int] = None  # Overrides tenant touch_cap
+    do_not_contact_until: Optional[str] = None  # ISO date YYYY-MM-DD
+    monthly_touch_count: int = 0  # Touches this month (for monthly cap reset)
+    is_verified: bool = True  # False for placeholder parties from unknown emails
+    source: str = "sage"  # sage, email_inbound, manual
+
 
 class BehaviorInfo(BaseModel):
     """Historical payment behavior."""
@@ -93,14 +103,20 @@ class CaseContext(BaseModel):
     active_dispute: bool = False
     hardship_indicated: bool = False
 
-    # Tenant settings
-    brand_tone: str = "professional"
-    touch_cap: int = 10
+    # Tenant settings (effective values after override resolution by Django)
+    # These are the EFFECTIVE values: party.X_override OR tenant.X
+    brand_tone: str = "professional"  # Effective: party.tone_override OR tenant.brand_tone
+    touch_cap: int = 10  # Effective: party.touch_cap_override OR tenant.touch_cap
     touch_interval_days: int = 3
+    grace_days: int = 14  # Effective: party.grace_days_override OR tenant.grace_days
 
     # Promise verification settings
-    # This is the effective value (party override or org default)
     promise_grace_days: int = 3
+
+    # Debtor-specific context (NEW - for gate evaluation and draft generation)
+    do_not_contact_until: Optional[str] = None  # ISO date if set (from party)
+    monthly_touch_count: int = 0  # Current month's touch count (from party)
+    relationship_tier: str = "standard"  # From party (vip, standard, high_risk)
 
 
 class ClassifyRequest(BaseModel):

@@ -60,6 +60,13 @@ CLASSIFY_EMAIL_USER = """Classify this email from a debtor.
 - Active Dispute: {active_dispute}
 - Hardship Indicated: {hardship_indicated}
 
+**Party Verification Status:**
+- Party Verified: {is_verified}
+- Party Source: {party_source}
+
+Note: If party is not verified (is_verified=false), this sender may be unknown and was created as a placeholder.
+Consider REDIRECT classification if sender indicates they're not the right contact for AR matters.
+
 **Email:**
 From: {from_name} <{from_address}>
 Subject: {subject}

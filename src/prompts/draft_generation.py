@@ -24,6 +24,15 @@ Tone Definitions:
 - final_notice: Last attempt before escalation. States consequences clearly. "This is our final reminder before..."
 - concerned_inquiry: For good customers with unusual behaviour. "We noticed this is unusual for your account..."
 
+Relationship Tier Adjustments:
+- vip: Extra-polite language, offer direct contact with senior staff, acknowledge long relationship
+- standard: Normal professional communication
+- high_risk: More direct language, set clearer deadlines, emphasize consequences
+
+Verification Status Handling:
+- If party is NOT verified (is_verified=false): Use cautious language, include identity verification request
+  Example: "If you are not the correct contact for accounts receivable matters, please let us know..."
+
 Call-to-Action Options:
 - Request payment by specific date
 - Request a call to discuss
@@ -52,12 +61,15 @@ GENERATE_DRAFT_USER = """Generate a collection email draft.
 - Company: {party_name}
 - Customer Code: {customer_code}
 - Total Outstanding: {currency} {total_outstanding:,.2f}
+- Relationship Tier: {relationship_tier}
+- Party Verified: {is_verified}
 
 **Overdue Invoices:**
 {invoices_list}
 
 **Communication History:**
-- Previous Touches: {touch_count}
+- Monthly Touches: {monthly_touch_count} (this month)
+- Previous Touches (Total): {touch_count}
 - Last Contact: {last_touch_at}
 - Last Tone Used: {last_tone_used}
 - Last Response Type: {last_response_type}
@@ -80,4 +92,4 @@ GENERATE_DRAFT_USER = """Generate a collection email draft.
 - Brand Tone: {brand_tone}
 {custom_instructions}
 
-Generate the email draft."""
+Generate the email draft. Consider the relationship tier and verification status when crafting the message."""
