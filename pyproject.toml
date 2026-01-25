@@ -17,6 +17,9 @@ dependencies = [
     "langchain-google-genai>=2.0.0",  # Gemini provider (primary)
     "langchain-openai>=0.2.0",        # OpenAI provider (fallback)
 
+    # Security & Rate Limiting
+    "slowapi>=0.1.9",  # Rate limiting for FastAPI
+
     # Utilities
     "tenacity>=8.2.0",
     "python-dotenv>=1.0.0",

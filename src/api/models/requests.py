@@ -1,25 +1,35 @@
+"""
+Request models for Solvix AI Engine API.
+
+Security:
+- All string fields have max_length constraints to prevent memory exhaustion
+- custom_instructions has prompt injection detection
+- party_id/customer_code have flexible validation (external IDs from accounting software)
+"""
+
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class EmailContent(BaseModel):
     """Email content for classification."""
 
-    subject: str
-    body: str
-    from_address: str
-    from_name: Optional[str] = None
+    subject: str = Field(..., min_length=1, max_length=500)
+    body: str = Field(..., min_length=1, max_length=50000)  # 50KB max for email body
+    from_address: str = Field(..., min_length=1, max_length=320)  # RFC 5321 max email length
+    from_name: Optional[str] = Field(None, max_length=200)
     received_at: Optional[datetime] = None
 
 
 class PartyInfo(BaseModel):
     """Party (debtor) information."""
 
-    party_id: str
-    customer_code: str
-    name: str
+    # Flexible validation for external IDs (come from accounting software like Sage)
+    party_id: str = Field(..., min_length=1, max_length=100)
+    customer_code: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=500)
     country_code: Optional[str] = None
     currency: str = "GBP"
     credit_limit: Optional[float] = None
@@ -119,6 +129,22 @@ class CaseContext(BaseModel):
     relationship_tier: str = "standard"  # From party (vip, standard, high_risk)
 
 
+# Dangerous patterns that indicate potential prompt injection
+PROMPT_INJECTION_PATTERNS = [
+    "ignore previous",
+    "ignore above",
+    "disregard",
+    "system prompt",
+    "forget your instructions",
+    "new instructions",
+    "you are now",
+    "act as",
+    "pretend to be",
+    "override",
+    "bypass",
+]
+
+
 class ClassifyRequest(BaseModel):
     """Request to classify an inbound email."""
 
@@ -130,14 +156,44 @@ class GenerateDraftRequest(BaseModel):
     """Request to generate a collection email draft."""
 
     context: CaseContext
-    tone: str = "professional"  # friendly_reminder, professional, firm, final_notice
-    objective: Optional[str] = None  # follow_up, promise_reminder, escalation
-    custom_instructions: Optional[str] = None
+    tone: str = Field(
+        default="professional",
+        pattern=r"^(friendly_reminder|professional|firm|final_notice|concerned_inquiry)$",
+    )
+    objective: Optional[str] = Field(
+        default=None,
+        pattern=r"^(follow_up|promise_reminder|escalation|initial_contact)$",
+    )
+    # SECURITY: Limited to 1000 chars with prompt injection detection
+    custom_instructions: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("custom_instructions")
+    @classmethod
+    def sanitize_custom_instructions(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Validate custom_instructions for potential prompt injection attacks.
+
+        Checks for common patterns used to manipulate LLM behavior.
+        """
+        if v is None:
+            return v
+
+        v_lower = v.lower()
+        for pattern in PROMPT_INJECTION_PATTERNS:
+            if pattern in v_lower:
+                raise ValueError("Invalid instructions: contains potentially unsafe pattern")
+        return v
 
 
 class EvaluateGatesRequest(BaseModel):
     """Request to evaluate gates before taking action."""
 
     context: CaseContext
-    proposed_action: str  # send_email, create_case, escalate, close_case
-    proposed_tone: Optional[str] = None
+    proposed_action: str = Field(
+        ...,
+        pattern=r"^(send_email|create_case|escalate|close_case)$",
+    )
+    proposed_tone: Optional[str] = Field(
+        default=None,
+        pattern=r"^(friendly_reminder|professional|firm|final_notice|concerned_inquiry)$",
+    )

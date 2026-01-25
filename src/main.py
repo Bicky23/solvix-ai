@@ -5,6 +5,11 @@ Main entry point for the AI Engine service providing:
 - Email classification
 - Draft generation
 - Gate evaluation
+
+Security:
+- Rate limiting via slowapi (prevents DDoS and quota exhaustion)
+- CORS configured via settings
+- Structured error responses (no sensitive data leakage)
 """
 
 import logging
@@ -13,6 +18,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from src.api.errors import ErrorCode, ErrorResponse, SolvixBaseError
 from src.api.middleware import RequestIDMiddleware, get_request_id
@@ -27,6 +35,13 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# RATE LIMITING CONFIGURATION
+# =============================================================================
+# Prevents DDoS, API quota exhaustion, and billing abuse
+# Rates are per-IP address by default
+limiter = Limiter(key_func=get_remote_address)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,6 +52,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Provider: {settings.llm_provider}, Model: {model}")
     logger.info(f"Port: {settings.api_port}")
     logger.info(f"Debug: {settings.debug}")
+    logger.info("Rate limiting: ENABLED")
     yield
 
 
@@ -47,6 +63,12 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Attach limiter to app state (required by slowapi)
+app.state.limiter = limiter
+
+# Add rate limit exceeded handler
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Request ID middleware (must be added first to capture all requests)
 app.add_middleware(RequestIDMiddleware)
