@@ -9,6 +9,7 @@ will retry with feedback about what went wrong, giving the LLM a chance
 to correct its output.
 """
 
+import json
 import logging
 
 from pydantic import ValidationError
@@ -21,7 +22,6 @@ from src.guardrails.pipeline import guardrail_pipeline
 from src.llm.factory import llm_client
 from src.llm.schemas import DraftGenerationLLMResponse
 from src.prompts import GENERATE_DRAFT_SYSTEM, GENERATE_DRAFT_USER
-from src.utils import JSONExtractionError, extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -130,33 +130,19 @@ class DraftGenerator:
                 )
 
             # Call LLM with higher temperature for creative generation
+            # Use response_schema for guaranteed valid JSON (no markdown wrapping)
             response = await llm_client.complete(
                 system_prompt=GENERATE_DRAFT_SYSTEM,
                 user_prompt=user_prompt,
                 temperature=0.7,
-                json_mode=True,
+                response_schema=DraftGenerationLLMResponse,
             )
 
             # Track total tokens across retries
             total_tokens_used += response.usage.get("total_tokens", 0)
 
-            # Parse JSON response using robust extraction
-            try:
-                raw_result = extract_json(response.content)
-            except JSONExtractionError as e:
-                # Log with repr() to see actual characters including non-printable ones
-                content_preview = repr(response.content[:500]) if response.content else "None"
-                logger.error(
-                    f"Failed to parse JSON response (len={len(response.content) if response.content else 0}): {content_preview}"
-                )
-                raise LLMResponseInvalidError(
-                    message="LLM returned invalid JSON",
-                    details={
-                        "error": str(e),
-                        "raw_content": e.raw_content[:1000] if e.raw_content else "",
-                        "extraction_attempts": e.attempts,
-                    },
-                )
+            # Parse JSON response - structured output guarantees valid JSON
+            raw_result = json.loads(response.content)
 
             # Validate LLM response using Pydantic schema
             try:

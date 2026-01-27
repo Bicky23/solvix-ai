@@ -6,6 +6,7 @@ INSOLVENCY, DISPUTE, ALREADY_PAID, UNSUBSCRIBE, HOSTILE, PROMISE_TO_PAY,
 HARDSHIP, PLAN_REQUEST, REDIRECT, REQUEST_INFO, OUT_OF_OFFICE, COOPERATIVE, UNCLEAR
 """
 
+import json
 import logging
 from datetime import date
 
@@ -19,7 +20,6 @@ from src.guardrails.pipeline import guardrail_pipeline
 from src.llm.factory import llm_client
 from src.llm.schemas import ClassificationLLMResponse
 from src.prompts import CLASSIFY_EMAIL_SYSTEM, CLASSIFY_EMAIL_USER
-from src.utils import JSONExtractionError, extract_json
 
 logger = logging.getLogger(__name__)
 
@@ -61,27 +61,17 @@ class EmailClassifier:
         )
 
         # Call LLM with lower temperature for classification
+        # Use response_schema for guaranteed valid JSON (no markdown wrapping)
         response = await llm_client.complete(
             system_prompt=CLASSIFY_EMAIL_SYSTEM,
             user_prompt=user_prompt,
             temperature=0.2,
-            json_mode=True,
+            response_schema=ClassificationLLMResponse,
         )
 
-        # Parse JSON response using robust extraction
+        # Parse JSON response - structured output guarantees valid JSON
         tokens_used = response.usage.get("total_tokens", 0)
-        try:
-            raw_result = extract_json(response.content)
-        except JSONExtractionError as e:
-            logger.error(f"Failed to parse JSON response: {response.content[:500]}")
-            raise LLMResponseInvalidError(
-                message="LLM returned invalid JSON",
-                details={
-                    "error": str(e),
-                    "raw_content": e.raw_content[:1000],
-                    "extraction_attempts": e.attempts,
-                },
-            )
+        raw_result = json.loads(response.content)
 
         # Validate LLM response using Pydantic schema
         try:
