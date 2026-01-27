@@ -1,17 +1,22 @@
 """Entity Verification Guardrail - LLM-based validation of customer/party identifiers."""
 
 import asyncio
-import json
 import logging
 import re
+import time
 from typing import Any
 
 from src.api.models.requests import CaseContext
 from src.llm.factory import llm_client
+from src.utils.json_extractor import JSONExtractionError, extract_json
 
 from .base import BaseGuardrail, GuardrailResult, GuardrailSeverity
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for LLM validation
+MAX_RETRIES = 3
+INITIAL_BACKOFF_SECONDS = 1.0
 
 # Validation prompt for LLM-based entity verification
 ENTITY_VALIDATION_PROMPT = """Validate the following draft email for entity accuracy.
@@ -64,21 +69,46 @@ class EntityVerificationGuardrail(BaseGuardrail):
 
     def validate(self, output: str, context: CaseContext, **kwargs) -> list[GuardrailResult]:
         """
-        Validate entity identifiers using LLM-based verification.
+        Validate entity identifiers using LLM-based verification with retry.
 
         Runs the LLM synchronously using asyncio.run() since guardrails
-        execute in a thread pool.
+        execute in a thread pool. Retries on failure instead of falling back
+        to regex-based validation.
         """
         results = []
 
-        # Run LLM-based entity validation
-        try:
-            llm_result = self._validate_entities_with_llm(output, context)
-            results.extend(llm_result)
-        except Exception as e:
-            logger.error(f"LLM-based entity validation failed: {e}")
-            # Fall back to basic validation on LLM failure
-            results.extend(self._basic_entity_validation(output, context))
+        # Run LLM-based entity validation with retry
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                llm_result = self._validate_entities_with_llm(output, context)
+                results.extend(llm_result)
+                last_error = None
+                break
+            except (JSONExtractionError, ValueError) as e:
+                last_error = e
+                if attempt < MAX_RETRIES - 1:
+                    backoff = INITIAL_BACKOFF_SECONDS * (2**attempt)
+                    logger.warning(
+                        "Entity validation attempt %d failed: %s. Retrying in %.1fs...",
+                        attempt + 1,
+                        e,
+                        backoff,
+                    )
+                    time.sleep(backoff)
+                else:
+                    logger.error("Entity validation failed after %d attempts: %s", MAX_RETRIES, e)
+
+        # If all retries failed, fail the guardrail (don't silently pass with regex)
+        if last_error is not None:
+            results.append(
+                self._fail(
+                    message=f"Entity validation failed: {last_error}",
+                    expected="Valid LLM response",
+                    found=str(last_error),
+                    details={"error": str(last_error), "retries": MAX_RETRIES},
+                )
+            )
 
         # Only validate emails if extracted_data is provided (keep this deterministic)
         extracted_data = kwargs.get("extracted_data")
@@ -118,16 +148,16 @@ class EntityVerificationGuardrail(BaseGuardrail):
             finally:
                 loop.close()
         except Exception as e:
-            logger.error(f"LLM call failed in entity verification: {e}")
+            logger.error("LLM call failed in entity verification: %s", e)
             raise
 
-        # Parse LLM response
+        # Parse LLM response using robust extractor (handles markdown, etc.)
         try:
-            result = json.loads(response.content)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response as JSON: {e}")
-            logger.debug(f"Raw response: {response.content[:500]}")
-            raise ValueError(f"Invalid JSON from LLM: {e}")
+            result = extract_json(response.content)
+        except JSONExtractionError as e:
+            logger.error("Failed to extract JSON from LLM response: %s", e)
+            logger.debug("Raw response: %s", response.content[:500])
+            raise
 
         results = []
 
@@ -174,65 +204,16 @@ class EntityVerificationGuardrail(BaseGuardrail):
             )
 
         logger.info(
-            f"Entity verification completed: customer_code_valid={result.get('customer_code_valid')}, "
-            f"party_name_valid={result.get('party_name_valid')}, passed={result.get('passed')}"
+            "Entity verification completed: customer_code_valid=%s, party_name_valid=%s, passed=%s",
+            result.get("customer_code_valid"),
+            result.get("party_name_valid"),
+            result.get("passed"),
         )
 
         return results
 
-    def _basic_entity_validation(self, output: str, context: CaseContext) -> list[GuardrailResult]:
-        """
-        Basic fallback validation when LLM is unavailable.
-
-        Only checks if the correct values ARE present (no false positives).
-        """
-        results = []
-
-        # Check customer code presence (if mentioned, should be correct)
-        valid_code = context.party.customer_code.upper()
-        output_upper = output.upper()
-
-        if valid_code in output_upper:
-            results.append(
-                self._pass(
-                    message="Customer code found and validated",
-                    details={"customer_code": valid_code},
-                )
-            )
-        else:
-            # Code not mentioned is OK - we can't reliably detect mismatches without LLM
-            results.append(
-                self._pass(
-                    message="Customer code not explicitly mentioned (fallback validation)",
-                    details={"expected_code": valid_code, "fallback": True},
-                )
-            )
-
-        # Check party name presence
-        valid_name = context.party.name.lower()
-        output_lower = output.lower()
-        name_parts = [p for p in valid_name.split() if len(p) > 3]
-
-        if valid_name in output_lower or any(part in output_lower for part in name_parts):
-            results.append(
-                self._pass(
-                    message="Party name validated",
-                    details={"party_name": context.party.name},
-                )
-            )
-        else:
-            # Name not found - pass with warning in fallback mode
-            results.append(
-                self._pass(
-                    message="Party name validation skipped (fallback mode)",
-                    details={"expected_name": context.party.name, "fallback": True},
-                )
-            )
-
-        return results
-
     def _validate_emails(
-        self, output: str, context: CaseContext, extracted_data: Any
+        self, output: str, _context: CaseContext, extracted_data: Any
     ) -> GuardrailResult:
         """Validate that email addresses are not fabricated."""
         # Extract email addresses from output
