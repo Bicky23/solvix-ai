@@ -4,7 +4,7 @@ Gate evaluation API endpoint.
 POST /evaluate-gates - Evaluate gates before allowing a collection action.
 
 Security:
-- Rate limited: 30 requests/minute per IP (less expensive than generation)
+- Rate limited: configurable via settings (default 100/minute for internal service calls)
 """
 
 import logging
@@ -16,6 +16,7 @@ from slowapi.util import get_remote_address
 from src.api.errors import ErrorResponse
 from src.api.models.requests import EvaluateGatesRequest
 from src.api.models.responses import EvaluateGatesResponse
+from src.config.settings import settings
 from src.engine.gate_evaluator import gate_evaluator
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ limiter = Limiter(key_func=get_remote_address)
         503: {"model": ErrorResponse, "description": "LLM provider unavailable"},
     },
 )
-@limiter.limit("30/minute")
+@limiter.limit(settings.rate_limit_gates)
 async def evaluate_gates(
     request: Request, gates_request: EvaluateGatesRequest
 ) -> EvaluateGatesResponse:

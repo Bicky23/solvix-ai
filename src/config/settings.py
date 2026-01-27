@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
+    # Rate Limiting (per-IP, per-minute)
+    # Higher limits for internal service-to-service calls
+    rate_limit_classify: str = "100/minute"
+    rate_limit_generate: str = "100/minute"
+    rate_limit_gates: str = "100/minute"
+
     model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 

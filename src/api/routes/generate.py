@@ -4,7 +4,7 @@ Draft generation API endpoint.
 POST /generate-draft - Generate a collection email draft.
 
 Security:
-- Rate limited: 10 requests/minute per IP (expensive LLM operation)
+- Rate limited: configurable via settings (default 100/minute for internal service calls)
 """
 
 import logging
@@ -16,6 +16,7 @@ from slowapi.util import get_remote_address
 from src.api.errors import ErrorResponse
 from src.api.models.requests import GenerateDraftRequest
 from src.api.models.responses import GenerateDraftResponse
+from src.config.settings import settings
 from src.engine.generator import generator
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ limiter = Limiter(key_func=get_remote_address)
         503: {"model": ErrorResponse, "description": "LLM provider unavailable"},
     },
 )
-@limiter.limit("10/minute")
+@limiter.limit(settings.rate_limit_generate)
 async def generate_draft(
     request: Request, generate_request: GenerateDraftRequest
 ) -> GenerateDraftResponse:

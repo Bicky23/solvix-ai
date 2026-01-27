@@ -4,7 +4,7 @@ Email classification API endpoint.
 POST /classify - Classify an inbound email from a debtor.
 
 Security:
-- Rate limited: 20 requests/minute per IP (prevents abuse)
+- Rate limited: configurable via settings (default 100/minute for internal service calls)
 """
 
 import logging
@@ -16,6 +16,7 @@ from slowapi.util import get_remote_address
 from src.api.errors import ErrorResponse
 from src.api.models.requests import ClassifyRequest
 from src.api.models.responses import ClassifyResponse
+from src.config.settings import settings
 from src.engine.classifier import classifier
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ limiter = Limiter(key_func=get_remote_address)
         503: {"model": ErrorResponse, "description": "LLM provider unavailable"},
     },
 )
-@limiter.limit("20/minute")
+@limiter.limit(settings.rate_limit_classify)
 async def classify_email(request: Request, classify_request: ClassifyRequest) -> ClassifyResponse:
     """
     Classify an inbound email from a debtor.
