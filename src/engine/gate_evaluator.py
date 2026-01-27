@@ -1,40 +1,52 @@
 """
 Gate evaluation engine.
 
-Evaluates 6 gates before allowing collection actions based on ai_logic.md:
-touch_cap, cooling_off, dispute_active, hardship, unsubscribe, escalation_appropriate
+Evaluates 6 compliance gates before allowing collection actions.
+Uses deterministic Python logic instead of LLM calls for reliability and speed.
+
+Gates:
+- touch_cap: Maximum touches per month not exceeded
+- cooling_off: Minimum days between touches respected
+- dispute_active: No contact if dispute is pending
+- hardship: Special handling if hardship indicated
+- unsubscribe: No contact if opted out
+- escalation_appropriate: Valid escalation path exists
 """
 
-import json
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
-from pydantic import ValidationError
-
-from src.api.errors import LLMResponseInvalidError
 from src.api.models.requests import EvaluateGatesRequest
 from src.api.models.responses import EvaluateGatesResponse, GateResult
-from src.llm.factory import llm_client
-from src.llm.schemas import GateEvaluationLLMResponse
-from src.prompts import EVALUATE_GATES_SYSTEM, EVALUATE_GATES_USER
 
 logger = logging.getLogger(__name__)
 
+# Tone escalation order (for escalation_appropriate gate)
+TONE_ESCALATION_ORDER = [
+    "friendly_reminder",
+    "professional",
+    "concerned_inquiry",
+    "firm",
+    "final_notice",
+]
+
 
 class GateEvaluator:
-    """Evaluates gates before allowing collection actions."""
+    """Evaluates compliance gates using deterministic rules."""
 
     async def evaluate(self, request: EvaluateGatesRequest) -> EvaluateGatesResponse:
         """
-        Evaluate gates for a proposed action.
+        Evaluate gates for a proposed action using rule-based logic.
 
         Args:
             request: Gate evaluation request with context and proposed action
 
         Returns:
-            Gate evaluation results
+            Gate evaluation results with pass/fail for each gate
         """
         comm = request.context.communication
+        context = request.context
 
         # Calculate days since last touch
         days_since_last_touch = 999  # Default to large number if never contacted
@@ -42,93 +54,274 @@ class GateEvaluator:
             delta = datetime.now(timezone.utc) - comm.last_touch_at
             days_since_last_touch = delta.days
 
-        # Calculate total outstanding
-        total_outstanding = sum(o.amount_due for o in request.context.obligations)
-
-        # Get behavior info
-        behavior = request.context.behavior
-
         # Check do_not_contact_until date
         do_not_contact_active = False
-        do_not_contact_until = request.context.do_not_contact_until
-        if do_not_contact_until:
+        if context.do_not_contact_until:
             try:
-                hold_date = datetime.fromisoformat(do_not_contact_until)
-                # Make hold_date timezone-aware if it isn't
+                hold_date = datetime.fromisoformat(context.do_not_contact_until)
                 if hold_date.tzinfo is None:
                     hold_date = hold_date.replace(tzinfo=timezone.utc)
                 do_not_contact_active = datetime.now(timezone.utc).date() < hold_date.date()
             except ValueError:
-                logger.warning(f"Invalid do_not_contact_until date format: {do_not_contact_until}")
+                logger.warning(f"Invalid do_not_contact_until date: {context.do_not_contact_until}")
 
-        # Build user prompt
-        user_prompt = EVALUATE_GATES_USER.format(
-            proposed_action=request.proposed_action,
-            proposed_tone=request.proposed_tone or "not specified",
-            monthly_touch_count=request.context.monthly_touch_count,  # Use monthly count (resets each month)
-            touch_cap=request.context.touch_cap,
-            days_since_last_touch=days_since_last_touch,
-            touch_interval_days=request.context.touch_interval_days,
-            active_dispute=request.context.active_dispute,
-            hardship_indicated=request.context.hardship_indicated,
-            unsubscribe_requested=False,  # TODO: Add to context model
-            broken_promises_count=request.context.broken_promises_count,
-            last_tone_used=comm.last_tone_used if comm else "None",
-            case_state=request.context.case_state or "ACTIVE",
-            currency=request.context.party.currency,
-            total_outstanding=total_outstanding,
-            segment=behavior.segment if behavior else "standard",
-            # New debtor-level fields
-            do_not_contact_until=do_not_contact_until or "None",
-            do_not_contact_active=do_not_contact_active,
-            relationship_tier=request.context.relationship_tier,
-            is_verified=request.context.party.is_verified,
-        )
-
-        # Call LLM with very low temperature for consistent evaluation
-        # Use response_schema for guaranteed valid JSON (no markdown wrapping)
-        response = await llm_client.complete(
-            system_prompt=EVALUATE_GATES_SYSTEM,
-            user_prompt=user_prompt,
-            temperature=0.1,
-            response_schema=GateEvaluationLLMResponse,
-        )
-
-        # Parse JSON response - structured output guarantees valid JSON
-        tokens_used = response.usage.get("total_tokens", 0)
-        raw_result = json.loads(response.content)
-
-        # Validate LLM response using Pydantic schema
-        try:
-            result = GateEvaluationLLMResponse(**raw_result)
-        except ValidationError as e:
-            logger.error(f"LLM response validation failed: {e}")
-            raise LLMResponseInvalidError(
-                message="LLM returned invalid gate evaluation response",
-                details={"validation_errors": e.errors(), "raw_response": raw_result},
-            )
-
-        # Convert validated gate results to response model
+        # Evaluate each gate
         gate_results = {}
-        for gate_name, gate_data in result.gate_results.items():
-            gate_results[gate_name] = GateResult(
-                passed=gate_data.passed,
-                reason=gate_data.reason,
-                current_value=gate_data.current_value,
-                threshold=gate_data.threshold,
-            )
+
+        # 1. Touch Cap Gate
+        gate_results["touch_cap"] = self._evaluate_touch_cap(
+            monthly_count=context.monthly_touch_count,
+            cap=context.touch_cap,
+        )
+
+        # 2. Cooling Off Gate
+        gate_results["cooling_off"] = self._evaluate_cooling_off(
+            days_since_last=days_since_last_touch,
+            interval_days=context.touch_interval_days,
+            do_not_contact_active=do_not_contact_active,
+            do_not_contact_until=context.do_not_contact_until,
+        )
+
+        # 3. Dispute Active Gate
+        gate_results["dispute_active"] = self._evaluate_dispute(
+            active_dispute=context.active_dispute,
+        )
+
+        # 4. Hardship Gate
+        gate_results["hardship"] = self._evaluate_hardship(
+            hardship_indicated=context.hardship_indicated,
+        )
+
+        # 5. Unsubscribe Gate
+        # TODO: Add unsubscribe_requested to context model
+        gate_results["unsubscribe"] = self._evaluate_unsubscribe(
+            unsubscribe_requested=False,
+        )
+
+        # 6. Escalation Appropriate Gate
+        gate_results["escalation_appropriate"] = self._evaluate_escalation(
+            proposed_tone=request.proposed_tone,
+            last_tone_used=comm.last_tone_used if comm else None,
+            touch_count=comm.touch_count if comm else 0,
+            broken_promises_count=context.broken_promises_count,
+            case_state=context.case_state,
+        )
+
+        # Overall allowed if all gates pass
+        all_passed = all(g.passed for g in gate_results.values())
+
+        # Generate recommended action if blocked
+        recommended_action = None
+        if not all_passed:
+            recommended_action = self._get_recommended_action(gate_results)
 
         logger.info(
-            f"Evaluated gates for {request.context.party.customer_code}: "
-            f"action={request.proposed_action}, allowed={result.allowed}"
+            f"Evaluated gates for {context.party.customer_code}: "
+            f"action={request.proposed_action}, allowed={all_passed}, "
+            f"failed_gates={[k for k, v in gate_results.items() if not v.passed]}"
         )
 
         return EvaluateGatesResponse(
-            allowed=result.allowed,
+            allowed=all_passed,
             gate_results=gate_results,
-            recommended_action=result.recommended_action,
-            tokens_used=tokens_used,
+            recommended_action=recommended_action,
+            tokens_used=0,  # No LLM call
         )
+
+    def _evaluate_touch_cap(self, monthly_count: int, cap: int) -> GateResult:
+        """Check if monthly touch cap has been reached."""
+        passed = monthly_count < cap
+        return GateResult(
+            passed=passed,
+            reason=f"Monthly touches ({monthly_count}) {'below' if passed else 'at or exceeds'} cap ({cap})",
+            current_value=monthly_count,
+            threshold=cap,
+        )
+
+    def _evaluate_cooling_off(
+        self,
+        days_since_last: int,
+        interval_days: int,
+        do_not_contact_active: bool,
+        do_not_contact_until: Optional[str],
+    ) -> GateResult:
+        """Check if cooling off period has elapsed."""
+        # Do not contact hold takes precedence
+        if do_not_contact_active:
+            return GateResult(
+                passed=False,
+                reason=f"Do not contact until {do_not_contact_until}",
+                current_value=0,
+                threshold=interval_days,
+            )
+
+        passed = days_since_last >= interval_days
+        return GateResult(
+            passed=passed,
+            reason=f"Days since last touch ({days_since_last}) {'meets' if passed else 'below'} minimum interval ({interval_days})",
+            current_value=days_since_last,
+            threshold=interval_days,
+        )
+
+    def _evaluate_dispute(self, active_dispute: bool) -> GateResult:
+        """Check if there's an active dispute blocking contact."""
+        passed = not active_dispute
+        return GateResult(
+            passed=passed,
+            reason="No active dispute" if passed else "Active dispute - contact blocked",
+            current_value=active_dispute,
+            threshold=False,
+        )
+
+    def _evaluate_hardship(self, hardship_indicated: bool) -> GateResult:
+        """Check if hardship has been indicated."""
+        # Hardship doesn't block, but flags for special handling
+        # For now, we pass but include warning in reason
+        if hardship_indicated:
+            return GateResult(
+                passed=True,  # Allow but with special handling
+                reason="Hardship indicated - use sensitive tone",
+                current_value=hardship_indicated,
+                threshold=None,
+            )
+        return GateResult(
+            passed=True,
+            reason="No hardship indicated",
+            current_value=hardship_indicated,
+            threshold=None,
+        )
+
+    def _evaluate_unsubscribe(self, unsubscribe_requested: bool) -> GateResult:
+        """Check if party has requested to unsubscribe."""
+        passed = not unsubscribe_requested
+        return GateResult(
+            passed=passed,
+            reason="No unsubscribe request"
+            if passed
+            else "Unsubscribe requested - contact blocked",
+            current_value=unsubscribe_requested,
+            threshold=False,
+        )
+
+    def _evaluate_escalation(
+        self,
+        proposed_tone: Optional[str],
+        last_tone_used: Optional[str],
+        touch_count: int,
+        broken_promises_count: int,
+        case_state: Optional[str],
+    ) -> GateResult:
+        """
+        Check if proposed escalation is appropriate.
+
+        Rules:
+        - Can't jump to final_notice on first contact
+        - Tone should follow escalation order (with some flexibility)
+        - Broken promises justify faster escalation
+        - Can't escalate if already at highest level
+        """
+        if not proposed_tone:
+            return GateResult(
+                passed=True,
+                reason="No specific tone proposed",
+                current_value=None,
+                threshold=None,
+            )
+
+        proposed_tone_lower = proposed_tone.lower()
+
+        # Get positions in escalation order
+        proposed_idx = (
+            TONE_ESCALATION_ORDER.index(proposed_tone_lower)
+            if proposed_tone_lower in TONE_ESCALATION_ORDER
+            else -1
+        )
+        last_idx = (
+            TONE_ESCALATION_ORDER.index(last_tone_used.lower())
+            if last_tone_used and last_tone_used.lower() in TONE_ESCALATION_ORDER
+            else -1
+        )
+
+        # Unknown tone - allow
+        if proposed_idx == -1:
+            return GateResult(
+                passed=True,
+                reason=f"Tone '{proposed_tone}' not in standard escalation path",
+                current_value=proposed_tone,
+                threshold=None,
+            )
+
+        # First contact rules
+        if touch_count == 0 or last_idx == -1:
+            # Can't start with firm or final_notice
+            if proposed_idx >= 3:  # firm or final_notice
+                return GateResult(
+                    passed=False,
+                    reason=f"Cannot start with '{proposed_tone}' on first contact",
+                    current_value=proposed_tone,
+                    threshold="friendly_reminder or professional",
+                )
+            return GateResult(
+                passed=True,
+                reason=f"'{proposed_tone}' appropriate for first contact",
+                current_value=proposed_tone,
+                threshold=None,
+            )
+
+        # Check escalation jump
+        jump = proposed_idx - last_idx
+
+        # Allow same or lower tone (de-escalation is fine)
+        if jump <= 0:
+            return GateResult(
+                passed=True,
+                reason=f"Tone '{proposed_tone}' same or lower than last '{last_tone_used}'",
+                current_value=proposed_tone,
+                threshold=last_tone_used,
+            )
+
+        # Allow single-step escalation
+        if jump == 1:
+            return GateResult(
+                passed=True,
+                reason=f"Single-step escalation from '{last_tone_used}' to '{proposed_tone}'",
+                current_value=proposed_tone,
+                threshold=last_tone_used,
+            )
+
+        # Allow double-step escalation if broken promises
+        if jump == 2 and broken_promises_count > 0:
+            return GateResult(
+                passed=True,
+                reason=f"Double-step escalation justified by {broken_promises_count} broken promises",
+                current_value=proposed_tone,
+                threshold=last_tone_used,
+            )
+
+        # Too aggressive escalation
+        return GateResult(
+            passed=False,
+            reason=f"Escalation from '{last_tone_used}' to '{proposed_tone}' too aggressive (jump of {jump} levels)",
+            current_value=proposed_tone,
+            threshold=f"Max 1 level escalation (try '{TONE_ESCALATION_ORDER[last_idx + 1]}')",
+        )
+
+    def _get_recommended_action(self, gate_results: dict[str, GateResult]) -> str:
+        """Generate recommended action based on failed gates."""
+        failed = [k for k, v in gate_results.items() if not v.passed]
+
+        if "unsubscribe" in failed:
+            return "Remove from contact list - party has opted out"
+        if "dispute_active" in failed:
+            return "Wait for dispute resolution before contact"
+        if "cooling_off" in failed:
+            return "Wait until cooling off period ends"
+        if "touch_cap" in failed:
+            return "Monthly touch limit reached - wait until next month"
+        if "escalation_appropriate" in failed:
+            return "Use less aggressive tone or wait for more touchpoints"
+
+        return "Review gate failures and adjust approach"
 
 
 # Singleton instance
