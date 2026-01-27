@@ -5,7 +5,7 @@ These models ensure type safety when parsing LLM outputs and provide
 clear error messages when the LLM returns malformed data.
 """
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -90,38 +90,3 @@ class DraftGenerationLLMResponse(BaseModel):
         min_length=1,
         description="Email body content",
     )
-
-
-class GateResultLLM(BaseModel):
-    """Single gate evaluation result from LLM."""
-
-    passed: bool = Field(..., description="Whether the gate passed")
-    reason: str = Field(..., description="Explanation for the gate result")
-    current_value: Optional[Any] = Field(None, description="Current value being evaluated")
-    threshold: Optional[Any] = Field(None, description="Threshold for the gate")
-
-
-class GateEvaluationLLMResponse(BaseModel):
-    """
-    Expected response structure from gate evaluation LLM calls.
-
-    The LLM must return JSON matching this schema.
-    """
-
-    allowed: bool = Field(
-        ...,
-        description="Whether the proposed action is allowed",
-    )
-    gate_results: Dict[str, GateResultLLM] = Field(
-        ...,
-        description="Individual gate evaluation results",
-    )
-    recommended_action: Optional[str] = Field(
-        None,
-        description="Recommended alternative action if not allowed",
-    )
-
-    # Note: We don't validate that all 6 gates are present because
-    # the LLM may return only relevant gates depending on context.
-    # The required gates are: touch_cap, cooling_off, dispute_active,
-    # hardship, unsubscribe, escalation_appropriate
