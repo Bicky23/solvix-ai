@@ -1,11 +1,18 @@
 """OpenAI LLM provider using LangChain."""
 
 import logging
+import time
 from typing import Any, Dict, Optional, Type
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from src.config.settings import settings
 
@@ -18,6 +25,30 @@ try:
     from openai import LengthFinishReasonError
 except ImportError:
     LengthFinishReasonError = None  # Older SDK versions may not have this
+
+# Import RateLimitError for retry logic
+try:
+    from openai import RateLimitError as OpenAIRateLimitError
+
+    OPENAI_RETRYABLE_ERRORS = (OpenAIRateLimitError,)
+except ImportError:
+    OPENAI_RETRYABLE_ERRORS = ()
+
+
+def _log_retry(retry_state):
+    """Log retry attempts with structured metrics."""
+    exception = retry_state.outcome.exception()
+    logger.warning(
+        "OpenAI retry attempt",
+        extra={
+            "metric_type": "llm_retry_attempt",
+            "provider": "openai",
+            "attempt": retry_state.attempt_number,
+            "wait_seconds": retry_state.next_action.sleep if retry_state.next_action else 0,
+            "error": str(exception),
+            "error_type": type(exception).__name__,
+        },
+    )
 
 
 class OpenAIProvider(BaseLLMProvider):
@@ -104,15 +135,44 @@ class OpenAIProvider(BaseLLMProvider):
                 response_schema is not None,
             )
 
+            # Inner function with retry for rate limits
+            @retry(
+                retry=retry_if_exception_type(OPENAI_RETRYABLE_ERRORS)
+                if OPENAI_RETRYABLE_ERRORS
+                else retry_if_exception_type(Exception),
+                stop=stop_after_attempt(settings.llm_max_retries),
+                wait=wait_exponential(multiplier=1, min=2, max=30),
+                before_sleep=_log_retry,
+                reraise=True,
+            )
+            async def _invoke_with_retry(llm_client, msgs):
+                return await llm_client.ainvoke(msgs)
+
+            start_time = time.perf_counter()
+
             # Use structured output if schema provided (more reliable)
             if response_schema:
                 structured_client = client.with_structured_output(
                     response_schema,
                     method="json_schema",
                 )
-                result = await structured_client.ainvoke(messages)
+                result = await _invoke_with_retry(structured_client, messages)
                 content = result.model_dump_json()
                 usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                logger.info(
+                    "LLM call completed",
+                    extra={
+                        "metric_type": "llm_call",
+                        "provider": "openai",
+                        "model": self._model,
+                        "latency_ms": round(latency_ms, 2),
+                        "input_tokens": usage["prompt_tokens"],
+                        "output_tokens": usage["completion_tokens"],
+                        "success": True,
+                        "structured": True,
+                    },
+                )
                 return LLMResponse(
                     content=content,
                     model=self._model,
@@ -122,7 +182,7 @@ class OpenAIProvider(BaseLLMProvider):
                 )
 
             # Standard invoke for non-structured output
-            response = await client.ainvoke(messages)
+            response = await _invoke_with_retry(client, messages)
 
             # Extract usage metadata (LangChain standardizes this)
             usage = {
@@ -137,7 +197,20 @@ class OpenAIProvider(BaseLLMProvider):
                 else 0,
             }
 
-            logger.debug(f"OpenAI response: tokens={usage['total_tokens']}")
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(
+                "LLM call completed",
+                extra={
+                    "metric_type": "llm_call",
+                    "provider": "openai",
+                    "model": self._model,
+                    "latency_ms": round(latency_ms, 2),
+                    "input_tokens": usage["prompt_tokens"],
+                    "output_tokens": usage["completion_tokens"],
+                    "success": True,
+                    "structured": False,
+                },
+            )
 
             return LLMResponse(
                 content=response.content,

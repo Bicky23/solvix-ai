@@ -1,6 +1,7 @@
 """Guardrail Pipeline - orchestrates all guardrails."""
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Tuple
 
@@ -75,18 +76,44 @@ class GuardrailPipeline:
         output: str,
         context: CaseContext,
         **kwargs,
-    ) -> Tuple[str, list[GuardrailResult], Exception | None]:
+    ) -> Tuple[str, list[GuardrailResult], Exception | None, float]:
         """
-        Run a single guardrail and return results.
+        Run a single guardrail and return results with timing.
 
         Returns:
-            Tuple of (guardrail_name, results, exception_if_any)
+            Tuple of (guardrail_name, results, exception_if_any, latency_ms)
         """
+        start_time = time.perf_counter()
         try:
             results = guardrail.validate(output, context, **kwargs)
-            return (guardrail.name, results, None)
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            passed = all(r.passed for r in results)
+            logger.info(
+                "Guardrail completed",
+                extra={
+                    "metric_type": "guardrail_completed",
+                    "guardrail": guardrail.name,
+                    "severity": guardrail.severity.value,
+                    "latency_ms": round(latency_ms, 2),
+                    "passed": passed,
+                    "checks_count": len(results),
+                },
+            )
+            return (guardrail.name, results, None, latency_ms)
         except Exception as e:
-            return (guardrail.name, [], e)
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            logger.error(
+                "Guardrail failed with exception",
+                extra={
+                    "metric_type": "guardrail_error",
+                    "guardrail": guardrail.name,
+                    "severity": guardrail.severity.value,
+                    "latency_ms": round(latency_ms, 2),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+            return (guardrail.name, [], e, latency_ms)
 
     def validate(
         self,
@@ -125,9 +152,11 @@ class GuardrailPipeline:
         Note: fail_fast is not supported in parallel mode since all guardrails
         run concurrently. All results are collected and evaluated together.
         """
+        pipeline_start = time.perf_counter()
         all_results: list[GuardrailResult] = []
         blocking_guardrails: list[str] = []
         should_block = False
+        guardrail_latencies = {}
 
         # Submit all guardrails to thread pool
         futures = {
@@ -139,7 +168,8 @@ class GuardrailPipeline:
 
         # Collect results as they complete
         for future in as_completed(futures):
-            guardrail_name, results, exception = future.result()
+            guardrail_name, results, exception, latency_ms = future.result()
+            guardrail_latencies[guardrail_name] = latency_ms
 
             if exception:
                 logger.error(f"Guardrail {guardrail_name} raised exception: {exception}")
@@ -166,6 +196,21 @@ class GuardrailPipeline:
                         )
 
         all_passed = all(r.passed for r in all_results)
+        pipeline_latency_ms = (time.perf_counter() - pipeline_start) * 1000
+
+        # Log pipeline summary
+        logger.info(
+            "Guardrail pipeline completed",
+            extra={
+                "metric_type": "guardrail_pipeline",
+                "latency_ms": round(pipeline_latency_ms, 2),
+                "all_passed": all_passed,
+                "should_block": should_block,
+                "guardrails_run": len(self.guardrails),
+                "blocking_guardrails": blocking_guardrails,
+                "guardrail_latencies": {k: round(v, 2) for k, v in guardrail_latencies.items()},
+            },
+        )
 
         return GuardrailPipelineResult(
             all_passed=all_passed,
@@ -194,13 +239,32 @@ class GuardrailPipeline:
         Returns:
             GuardrailPipelineResult with all validation results
         """
+        pipeline_start = time.perf_counter()
         all_results: list[GuardrailResult] = []
         blocking_guardrails: list[str] = []
         should_block = False
+        guardrail_latencies = {}
 
         for guardrail in self.guardrails:
+            start_time = time.perf_counter()
             try:
                 results = guardrail.validate(output, context, **kwargs)
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                guardrail_latencies[guardrail.name] = latency_ms
+                passed = all(r.passed for r in results)
+
+                logger.info(
+                    "Guardrail completed",
+                    extra={
+                        "metric_type": "guardrail_completed",
+                        "guardrail": guardrail.name,
+                        "severity": guardrail.severity.value,
+                        "latency_ms": round(latency_ms, 2),
+                        "passed": passed,
+                        "checks_count": len(results),
+                    },
+                )
+
                 all_results.extend(results)
 
                 # Check for blocking failures
@@ -214,6 +278,19 @@ class GuardrailPipeline:
                         )
 
                         if fail_fast and result.severity == GuardrailSeverity.CRITICAL:
+                            pipeline_latency_ms = (time.perf_counter() - pipeline_start) * 1000
+                            logger.info(
+                                "Guardrail pipeline completed (fail-fast)",
+                                extra={
+                                    "metric_type": "guardrail_pipeline",
+                                    "latency_ms": round(pipeline_latency_ms, 2),
+                                    "all_passed": False,
+                                    "should_block": True,
+                                    "guardrails_run": len(guardrail_latencies),
+                                    "blocking_guardrails": blocking_guardrails,
+                                    "fail_fast": True,
+                                },
+                            )
                             # Stop immediately on critical failure
                             return GuardrailPipelineResult(
                                 all_passed=False,
@@ -224,7 +301,19 @@ class GuardrailPipeline:
                             )
 
             except Exception as e:
-                logger.error(f"Guardrail {guardrail.name} raised exception: {e}")
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                guardrail_latencies[guardrail.name] = latency_ms
+                logger.error(
+                    "Guardrail failed with exception",
+                    extra={
+                        "metric_type": "guardrail_error",
+                        "guardrail": guardrail.name,
+                        "severity": guardrail.severity.value,
+                        "latency_ms": round(latency_ms, 2),
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
+                )
                 # Create a failure result for the exception
                 all_results.append(
                     GuardrailResult(
@@ -239,6 +328,20 @@ class GuardrailPipeline:
                 blocking_guardrails.append(guardrail.name)
 
         all_passed = all(r.passed for r in all_results)
+        pipeline_latency_ms = (time.perf_counter() - pipeline_start) * 1000
+
+        logger.info(
+            "Guardrail pipeline completed",
+            extra={
+                "metric_type": "guardrail_pipeline",
+                "latency_ms": round(pipeline_latency_ms, 2),
+                "all_passed": all_passed,
+                "should_block": should_block,
+                "guardrails_run": len(self.guardrails),
+                "blocking_guardrails": blocking_guardrails,
+                "guardrail_latencies": {k: round(v, 2) for k, v in guardrail_latencies.items()},
+            },
+        )
 
         return GuardrailPipelineResult(
             all_passed=all_passed,

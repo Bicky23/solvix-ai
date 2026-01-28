@@ -46,20 +46,22 @@ class Settings(BaseSettings):
     gemini_api_key: Optional[str] = None
     gemini_model: str = "gemini-2.5-pro"
     gemini_temperature: float = 0.3
-    gemini_max_tokens: int = 4096  # Increased for longer drafts/structured output
+    gemini_max_tokens: int = 8192  # High for longer drafts/complex structured output
 
     # OpenAI Configuration (FALLBACK)
     # Note: gpt-5-nano is a reasoning model. Reasoning tokens consume from max_tokens budget.
     # With max_tokens=2000 and 2000 reasoning tokens, there's 0 left for output.
-    # 16384 provides ~4-8x headroom for reasoning models.
+    # 32768 provides headroom for reasoning models that consume tokens for "thinking".
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-5-nano"
     openai_temperature: float = 0.3
-    openai_max_tokens: int = 16384  # High for reasoning models (reasoning tokens eat this budget)
+    openai_max_tokens: int = (
+        32768  # Very high for reasoning models (reasoning tokens eat this budget)
+    )
 
-    # Timeouts
-    llm_timeout_seconds: int = 30
-    llm_max_retries: int = 3
+    # Timeouts and Retries
+    llm_timeout_seconds: int = 60  # Per-LLM-call timeout (increased for concurrent calls)
+    llm_max_retries: int = 3  # Used by tenacity retry decorator
 
     # Logging
     log_level: str = "INFO"

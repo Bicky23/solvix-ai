@@ -25,6 +25,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "httpx>=0.26.0",
     "nest-asyncio>=1.5.0",
+
+    # Google API (for Gemini rate limit error handling)
+    "google-api-core>=2.15.0",
 ]
 
 [project.optional-dependencies]

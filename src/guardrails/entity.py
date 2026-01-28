@@ -167,7 +167,7 @@ class EntityVerificationGuardrail(BaseGuardrail):
                         system_prompt="You are a validation assistant.",
                         user_prompt=prompt,
                         temperature=0,  # Deterministic for validation
-                        max_tokens=1024,  # Increased from 500 for reasoning models
+                        max_tokens=2048,  # High for reasoning models that consume tokens for "thinking"
                         # Use structured output for guaranteed valid JSON
                         response_schema=EntityValidationResult,
                     )

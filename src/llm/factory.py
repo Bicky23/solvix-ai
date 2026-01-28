@@ -1,6 +1,7 @@
 """LLM Provider factory with automatic fallback."""
 
 import logging
+import time
 
 from src.config.settings import settings
 
@@ -88,17 +89,38 @@ class LLMProviderWithFallback:
 
         Tries primary provider first, falls back to secondary on failure.
         """
+        start_time = time.perf_counter()
+
         try:
             response = await self.primary.complete(system_prompt, user_prompt, **kwargs)
+            latency_ms = (time.perf_counter() - start_time) * 1000
             logger.info(
-                "LLM request succeeded: provider=%s, model=%s, tokens=%s",
-                response.provider,
-                response.model,
-                response.usage["total_tokens"],
+                "LLM request completed",
+                extra={
+                    "metric_type": "llm_factory_call",
+                    "provider": response.provider,
+                    "model": response.model,
+                    "latency_ms": round(latency_ms, 2),
+                    "input_tokens": response.usage.get("prompt_tokens", 0),
+                    "output_tokens": response.usage.get("completion_tokens", 0),
+                    "total_tokens": response.usage.get("total_tokens", 0),
+                    "success": True,
+                    "used_fallback": False,
+                },
             )
             return response
         except Exception as e:
-            logger.error("Primary provider (%s) failed: %s", self.primary.provider_name, e)
+            primary_latency_ms = (time.perf_counter() - start_time) * 1000
+            logger.error(
+                "Primary provider failed",
+                extra={
+                    "metric_type": "llm_primary_failed",
+                    "provider": self.primary.provider_name,
+                    "latency_ms": round(primary_latency_ms, 2),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
 
             if not self.fallback_enabled:
                 logger.error("No fallback provider configured, raising error")
@@ -106,18 +128,42 @@ class LLMProviderWithFallback:
 
             logger.warning("Falling back to %s", self.fallback.provider_name)
             self.fallback_count += 1
+            fallback_start = time.perf_counter()
 
             try:
                 response = await self.fallback.complete(system_prompt, user_prompt, **kwargs)
+                total_latency_ms = (time.perf_counter() - start_time) * 1000
+                fallback_latency_ms = (time.perf_counter() - fallback_start) * 1000
                 logger.info(
-                    "Fallback succeeded: provider=%s, model=%s, tokens=%s",
-                    response.provider,
-                    response.model,
-                    response.usage["total_tokens"],
+                    "LLM fallback succeeded",
+                    extra={
+                        "metric_type": "llm_factory_call",
+                        "provider": response.provider,
+                        "model": response.model,
+                        "latency_ms": round(total_latency_ms, 2),
+                        "fallback_latency_ms": round(fallback_latency_ms, 2),
+                        "input_tokens": response.usage.get("prompt_tokens", 0),
+                        "output_tokens": response.usage.get("completion_tokens", 0),
+                        "total_tokens": response.usage.get("total_tokens", 0),
+                        "success": True,
+                        "used_fallback": True,
+                        "fallback_count": self.fallback_count,
+                    },
                 )
                 return response
             except Exception as fallback_error:
-                logger.error("Fallback provider also failed: %s", fallback_error)
+                total_latency_ms = (time.perf_counter() - start_time) * 1000
+                logger.error(
+                    "Fallback provider also failed",
+                    extra={
+                        "metric_type": "llm_factory_call",
+                        "latency_ms": round(total_latency_ms, 2),
+                        "success": False,
+                        "used_fallback": True,
+                        "error": str(fallback_error),
+                        "error_type": type(fallback_error).__name__,
+                    },
+                )
                 raise fallback_error
 
     async def health_check(self) -> dict:

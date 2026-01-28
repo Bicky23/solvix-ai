@@ -11,6 +11,7 @@ to correct its output.
 
 import json
 import logging
+import time
 
 from pydantic import ValidationError
 
@@ -119,6 +120,9 @@ class DraftGenerator:
         total_tokens_used = 0
         result = None
         guardrail_result = None
+        generation_start_time = time.perf_counter()
+        llm_latencies = []
+        guardrail_latencies = []
 
         for attempt in range(MAX_GUARDRAIL_RETRIES + 1):
             # Build prompt with any guardrail feedback from previous attempt
@@ -131,12 +135,14 @@ class DraftGenerator:
 
             # Call LLM with higher temperature for creative generation
             # Use response_schema for guaranteed valid JSON (no markdown wrapping)
+            llm_start = time.perf_counter()
             response = await llm_client.complete(
                 system_prompt=GENERATE_DRAFT_SYSTEM,
                 user_prompt=user_prompt,
                 temperature=0.7,
                 response_schema=DraftGenerationLLMResponse,
             )
+            llm_latencies.append((time.perf_counter() - llm_start) * 1000)
 
             # Track total tokens across retries
             total_tokens_used += response.usage.get("total_tokens", 0)
@@ -155,10 +161,12 @@ class DraftGenerator:
                 )
 
             # Run guardrails on generated draft body (critical for factual accuracy)
+            guardrail_start = time.perf_counter()
             guardrail_result = guardrail_pipeline.validate(
                 output=result.body,
                 context=request.context,
             )
+            guardrail_latencies.append((time.perf_counter() - guardrail_start) * 1000)
 
             # If all guardrails passed, we're done
             if guardrail_result.all_passed:
@@ -212,10 +220,25 @@ class DraftGenerator:
                 f"blocking={guardrail_result.blocking_guardrails}, warnings={warnings}"
             )
 
+        # Calculate end-to-end timing
+        total_latency_ms = (time.perf_counter() - generation_start_time) * 1000
+        retry_count = len(llm_latencies) - 1  # First attempt is not a retry
+
         logger.info(
-            f"Generated draft for {request.context.party.customer_code}: "
-            f"tone={request.tone}, invoices_referenced={len(invoices_referenced)}, "
-            f"guardrails_passed={guardrail_result.all_passed}, tokens={total_tokens_used}"
+            "Draft generation completed",
+            extra={
+                "metric_type": "draft_generation_completed",
+                "customer_code": request.context.party.customer_code,
+                "tone": request.tone,
+                "latency_ms": round(total_latency_ms, 2),
+                "llm_latency_ms": round(sum(llm_latencies), 2),
+                "guardrail_latency_ms": round(sum(guardrail_latencies), 2),
+                "retry_count": retry_count,
+                "total_tokens": total_tokens_used,
+                "guardrails_passed": guardrail_result.all_passed,
+                "invoices_referenced": len(invoices_referenced),
+                "blocking_failures": guardrail_result.blocking_guardrails,
+            },
         )
 
         return GenerateDraftResponse(

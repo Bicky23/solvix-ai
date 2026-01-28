@@ -1,17 +1,48 @@
 """Gemini LLM provider using LangChain."""
 
 import logging
+import time
 from typing import Any, Dict, Optional, Type
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from src.config.settings import settings
 
 from .base import BaseLLMProvider, LLMResponse
 
 logger = logging.getLogger(__name__)
+
+# Exceptions to retry on (rate limits, transient errors)
+try:
+    from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+
+    GEMINI_RETRYABLE_ERRORS = (ResourceExhausted, ServiceUnavailable)
+except ImportError:
+    GEMINI_RETRYABLE_ERRORS = ()
+
+
+def _log_retry(retry_state):
+    """Log retry attempts with structured metrics."""
+    exception = retry_state.outcome.exception()
+    logger.warning(
+        "Gemini retry attempt",
+        extra={
+            "metric_type": "llm_retry_attempt",
+            "provider": "gemini",
+            "attempt": retry_state.attempt_number,
+            "wait_seconds": retry_state.next_action.sleep if retry_state.next_action else 0,
+            "error": str(exception),
+            "error_type": type(exception).__name__,
+        },
+    )
 
 
 class GeminiProvider(BaseLLMProvider):
@@ -99,13 +130,28 @@ class GeminiProvider(BaseLLMProvider):
                 response_schema is not None,
             )
 
+            # Inner function with retry for rate limits
+            @retry(
+                retry=retry_if_exception_type(GEMINI_RETRYABLE_ERRORS)
+                if GEMINI_RETRYABLE_ERRORS
+                else retry_if_exception_type(Exception),
+                stop=stop_after_attempt(settings.llm_max_retries),
+                wait=wait_exponential(multiplier=1, min=2, max=30),
+                before_sleep=_log_retry,
+                reraise=True,
+            )
+            async def _invoke_with_retry(llm_client, msgs):
+                return await llm_client.ainvoke(msgs)
+
+            start_time = time.perf_counter()
+
             # Use structured output if schema provided (more reliable than json_mode)
             if response_schema:
                 structured_client = client.with_structured_output(
                     response_schema,
                     method="json_schema",  # More reliable than function_calling
                 )
-                result = await structured_client.ainvoke(messages)
+                result = await _invoke_with_retry(structured_client, messages)
 
                 # Validate non-empty response (Gemini sometimes returns None or empty)
                 if result is None:
@@ -130,6 +176,20 @@ class GeminiProvider(BaseLLMProvider):
                 content = result.model_dump_json()
                 # For structured output, we don't get usage metadata directly
                 usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                latency_ms = (time.perf_counter() - start_time) * 1000
+                logger.info(
+                    "LLM call completed",
+                    extra={
+                        "metric_type": "llm_call",
+                        "provider": "gemini",
+                        "model": self._model,
+                        "latency_ms": round(latency_ms, 2),
+                        "input_tokens": usage["prompt_tokens"],
+                        "output_tokens": usage["completion_tokens"],
+                        "success": True,
+                        "structured": True,
+                    },
+                )
                 return LLMResponse(
                     content=content,
                     model=self._model,
@@ -139,7 +199,7 @@ class GeminiProvider(BaseLLMProvider):
                 )
 
             # Standard invoke for non-structured output
-            response = await client.ainvoke(messages)
+            response = await _invoke_with_retry(client, messages)
 
             # Extract usage metadata (LangChain standardizes this)
             usage = {
@@ -154,8 +214,6 @@ class GeminiProvider(BaseLLMProvider):
                 else 0,
             }
 
-            logger.debug(f"Gemini response: tokens={usage['total_tokens']}")
-
             # Extract content - handle both string and list formats
             content = response.content
             if isinstance(content, list):
@@ -164,6 +222,21 @@ class GeminiProvider(BaseLLMProvider):
                     block.get("text", "") if isinstance(block, dict) else str(block)
                     for block in content
                 )
+
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(
+                "LLM call completed",
+                extra={
+                    "metric_type": "llm_call",
+                    "provider": "gemini",
+                    "model": self._model,
+                    "latency_ms": round(latency_ms, 2),
+                    "input_tokens": usage["prompt_tokens"],
+                    "output_tokens": usage["completion_tokens"],
+                    "success": True,
+                    "structured": False,
+                },
+            )
 
             return LLMResponse(
                 content=content,
@@ -176,6 +249,18 @@ class GeminiProvider(BaseLLMProvider):
             )
 
         except Exception as e:
+            # Log rate limit errors specifically
+            if GEMINI_RETRYABLE_ERRORS and isinstance(e, GEMINI_RETRYABLE_ERRORS):
+                logger.warning(
+                    "Gemini rate limit or transient error",
+                    extra={
+                        "metric_type": "rate_limit_hit",
+                        "provider": "gemini",
+                        "model": self._model,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
+                )
             logger.error(f"Gemini provider error: {e}")
             raise
 
