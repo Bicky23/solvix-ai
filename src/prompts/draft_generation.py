@@ -29,6 +29,15 @@ Relationship Tier Adjustments:
 - standard: Normal professional communication
 - high_risk: More direct language, set clearer deadlines, emphasize consequences
 
+Industry Context Usage:
+When industry context is provided, adapt your communication style:
+- Use industry-appropriate terminology and reference points
+- Respect industry payment norms (e.g., Net 60 is standard in manufacturing)
+- Apply the industry's escalation patience (patient = longer ramp-up, aggressive = faster escalation)
+- Reference common dispute types when acknowledging potential issues
+- Be mindful of seasonal patterns (e.g., retail Q4 holiday, construction winter slowdown)
+- Match the industry's preferred communication tone
+
 Verification Status Handling:
 - If party is NOT verified (is_verified=false): Use cautious language, include identity verification request
   Example: "If you are not the correct contact for accounts receivable matters, please let us know..."
@@ -93,10 +102,13 @@ GENERATE_DRAFT_USER = """Generate a collection email draft.
 - On-Time Rate: {on_time_rate}
 - Avg Days to Pay: {avg_days_to_pay}
 
+**Industry Context:**
+{industry_context}
+
 **Instructions:**
 - Tone: {tone}
 - Objective: {objective}
 - Brand Tone: {brand_tone}
 {custom_instructions}
 
-Generate the email draft. Consider the relationship tier and verification status when crafting the message."""
+Generate the email draft. Consider the relationship tier, verification status, and industry context when crafting the message."""

@@ -41,6 +41,9 @@ class EmailClassifier:
         total_outstanding = sum(o.amount_due for o in request.context.obligations)
         days_overdue_max = max((o.days_past_due for o in request.context.obligations), default=0)
 
+        # Build industry context section
+        industry_context = self._format_industry_context(request.context.industry)
+
         # Build user prompt with context
         user_prompt = CLASSIFY_EMAIL_USER.format(
             party_name=request.context.party.name,
@@ -54,6 +57,7 @@ class EmailClassifier:
             hardship_indicated=request.context.hardship_indicated,
             is_verified=request.context.party.is_verified,
             party_source=request.context.party.source,
+            industry_context=industry_context,
             from_name=request.email.from_name or "Unknown",
             from_address=request.email.from_address,
             subject=request.email.subject,
@@ -157,6 +161,29 @@ class EmailClassifier:
             tokens_used=tokens_used,
             guardrail_validation=guardrail_validation,
         )
+
+    def _format_industry_context(self, industry) -> str:
+        """Format industry context for prompt inclusion."""
+        if not industry:
+            return "Not specified (general B2B collection)"
+
+        lines = [
+            f"- Industry: {industry.name} ({industry.code})",
+        ]
+
+        if industry.common_dispute_types:
+            lines.append(f"- Common Dispute Types: {', '.join(industry.common_dispute_types)}")
+
+        if industry.hardship_indicators:
+            lines.append(f"- Industry Hardship Signals: {', '.join(industry.hardship_indicators)}")
+
+        if industry.dispute_handling_notes:
+            lines.append(f"- Dispute Notes: {industry.dispute_handling_notes}")
+
+        if industry.hardship_handling_notes:
+            lines.append(f"- Hardship Notes: {industry.hardship_handling_notes}")
+
+        return "\n".join(lines)
 
 
 # Singleton instance

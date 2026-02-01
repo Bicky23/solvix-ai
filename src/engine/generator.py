@@ -81,6 +81,9 @@ class DraftGenerator:
         # Get behavior info
         behavior = request.context.behavior
 
+        # Build industry context section
+        industry_context = self._format_industry_context(request.context.industry)
+
         # Build base user prompt
         base_user_prompt = GENERATE_DRAFT_USER.format(
             party_name=request.context.party.name,
@@ -107,6 +110,7 @@ class DraftGenerator:
             if behavior and behavior.on_time_rate
             else "Unknown",
             avg_days_to_pay=behavior.avg_days_to_pay if behavior else "Unknown",
+            industry_context=industry_context,
             tone=request.tone,
             objective=request.objective or "collect payment",
             brand_tone=request.context.brand_tone,
@@ -249,6 +253,34 @@ class DraftGenerator:
             tokens_used=total_tokens_used,
             guardrail_validation=guardrail_validation,
         )
+
+    def _format_industry_context(self, industry) -> str:
+        """Format industry context for prompt inclusion."""
+        if not industry:
+            return "Not specified (general B2B collection)"
+
+        lines = [
+            f"- Industry: {industry.name} ({industry.code})",
+            f"- Payment Norm: {industry.payment_cycle} (typical DSO: {industry.typical_dso_days} days)",
+            f"- Escalation Approach: {industry.escalation_patience}",
+            f"- Communication Style: {industry.preferred_tone}",
+        ]
+
+        if industry.common_dispute_types:
+            lines.append(f"- Common Disputes: {', '.join(industry.common_dispute_types)}")
+
+        if industry.ai_context_notes:
+            lines.append(f"- Industry Notes: {industry.ai_context_notes}")
+
+        if industry.seasonal_patterns:
+            # Get current quarter
+            from datetime import datetime
+
+            quarter = f"Q{(datetime.now().month - 1) // 3 + 1}"
+            if quarter in industry.seasonal_patterns:
+                lines.append(f"- Current Season ({quarter}): {industry.seasonal_patterns[quarter]}")
+
+        return "\n".join(lines)
 
     def _build_guardrail_feedback(self, guardrail_result: GuardrailPipelineResult) -> str:
         """

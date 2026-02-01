@@ -26,6 +26,12 @@ Data Extraction Rules:
 - If DISPUTE or ALREADY_PAID: Extract dispute_type (goods_not_received, quality_issue, pricing_error, already_paid, wrong_customer, other) and dispute_reason
 - If REDIRECT: Extract redirect_contact (name) and redirect_email (email address)
 
+Industry Context Usage:
+When industry context is provided, use it to better interpret the email:
+- Consider industry-specific dispute types (e.g., manufacturing: quality/specification issues; retail: returns/refunds)
+- Recognize industry-specific hardship signals (e.g., construction: project delays; retail: seasonal slowdown)
+- Adjust confidence based on how typical the response is for the industry
+
 Confidence Guidelines:
 - 0.9-1.0: Clear, unambiguous classification
 - 0.7-0.9: Likely correct but some ambiguity
@@ -66,6 +72,9 @@ CLASSIFY_EMAIL_USER = """Classify this email from a debtor.
 
 Note: If party is not verified (is_verified=false), this sender may be unknown and was created as a placeholder.
 Consider REDIRECT classification if sender indicates they're not the right contact for AR matters.
+
+**Industry Context:**
+{industry_context}
 
 **Email:**
 From: {from_name} <{from_address}>

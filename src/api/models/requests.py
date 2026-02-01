@@ -96,6 +96,31 @@ class PromiseHistory(BaseModel):
     outcome: str  # kept, broken, pending
 
 
+class IndustryInfo(BaseModel):
+    """Industry-specific context for AI operations.
+
+    Provides industry benchmarks and AI context that affects:
+    - Draft tone and escalation speed
+    - Dispute classification and handling
+    - Hardship detection and response
+    """
+
+    code: str  # Industry identifier: retail, manufacturing, b2b_services, etc.
+    name: str  # Display name
+    typical_dso_days: int  # Normal payment cycle for this industry
+    alarm_dso_days: int  # DSO that signals concern
+    payment_cycle: str  # immediate, net15, net30, net45, net60, net90
+    escalation_patience: str = "standard"  # patient, standard, aggressive
+    common_dispute_types: List[str] = []  # Expected dispute types
+    hardship_indicators: List[str] = []  # Industry-specific hardship signals
+    preferred_tone: str = "professional"  # formal, professional, casual
+    ai_context_notes: str = ""  # Free-form context for prompts
+    seasonal_patterns: dict = {}  # Q1, Q2, Q3, Q4 patterns
+    dispute_handling_notes: str = ""  # How to handle disputes
+    hardship_handling_notes: str = ""  # How to handle hardship
+    communication_notes: str = ""  # Industry communication conventions
+
+
 class CaseContext(BaseModel):
     """Full case context for AI operations."""
 
@@ -127,6 +152,9 @@ class CaseContext(BaseModel):
     do_not_contact_until: Optional[str] = None  # ISO date if set (from party)
     monthly_touch_count: int = 0  # Current month's touch count (from party)
     relationship_tier: str = "standard"  # From party (vip, standard, high_risk)
+
+    # Industry context (NEW - for draft generation and gate evaluation)
+    industry: Optional[IndustryInfo] = None
 
 
 # Dangerous patterns that indicate potential prompt injection

@@ -105,6 +105,7 @@ class GateEvaluator:
             touch_count=comm.touch_count if comm else 0,
             broken_promises_count=context.broken_promises_count,
             case_state=context.case_state,
+            industry=context.industry,
         )
 
         # Overall allowed if all gates pass
@@ -210,6 +211,7 @@ class GateEvaluator:
         touch_count: int,
         broken_promises_count: int,
         case_state: Optional[str],
+        industry=None,
     ) -> GateResult:
         """
         Check if proposed escalation is appropriate.
@@ -219,7 +221,15 @@ class GateEvaluator:
         - Tone should follow escalation order (with some flexibility)
         - Broken promises justify faster escalation
         - Can't escalate if already at highest level
+        - Industry escalation_patience affects allowed jump size:
+          - patient: max 1 step (manufacturing, government)
+          - standard: max 1 step, or 2 if broken promises
+          - aggressive: max 2 steps (retail)
         """
+        # Get industry escalation patience (affects allowed jump)
+        escalation_patience = "standard"
+        if industry and hasattr(industry, "escalation_patience"):
+            escalation_patience = industry.escalation_patience
         if not proposed_tone:
             return GateResult(
                 passed=True,
@@ -280,30 +290,51 @@ class GateEvaluator:
                 threshold=last_tone_used,
             )
 
-        # Allow single-step escalation
-        if jump == 1:
-            return GateResult(
-                passed=True,
-                reason=f"Single-step escalation from '{last_tone_used}' to '{proposed_tone}'",
-                current_value=proposed_tone,
-                threshold=last_tone_used,
-            )
+        # Determine max allowed escalation based on industry patience
+        # patient (manufacturing, government): strict 1-step only
+        # standard: 1-step, or 2-step if broken promises
+        # aggressive (retail): 2-step allowed
+        if escalation_patience == "aggressive":
+            max_jump = 2
+        elif escalation_patience == "patient":
+            max_jump = 1
+        else:  # standard
+            max_jump = 2 if broken_promises_count > 0 else 1
 
-        # Allow double-step escalation if broken promises
-        if jump == 2 and broken_promises_count > 0:
-            return GateResult(
-                passed=True,
-                reason=f"Double-step escalation justified by {broken_promises_count} broken promises",
-                current_value=proposed_tone,
-                threshold=last_tone_used,
-            )
+        # Allow escalation within limits
+        if jump <= max_jump:
+            if jump == 1:
+                return GateResult(
+                    passed=True,
+                    reason=f"Single-step escalation from '{last_tone_used}' to '{proposed_tone}'",
+                    current_value=proposed_tone,
+                    threshold=last_tone_used,
+                )
+            else:
+                reason_suffix = ""
+                if escalation_patience == "aggressive":
+                    reason_suffix = f" (industry={escalation_patience})"
+                elif broken_promises_count > 0:
+                    reason_suffix = f" (justified by {broken_promises_count} broken promises)"
+                return GateResult(
+                    passed=True,
+                    reason=f"Double-step escalation from '{last_tone_used}' to '{proposed_tone}'{reason_suffix}",
+                    current_value=proposed_tone,
+                    threshold=last_tone_used,
+                )
 
         # Too aggressive escalation
+        next_tone = (
+            TONE_ESCALATION_ORDER[last_idx + 1]
+            if last_idx + 1 < len(TONE_ESCALATION_ORDER)
+            else "N/A"
+        )
+        patience_hint = f" (industry patience: {escalation_patience})" if industry else ""
         return GateResult(
             passed=False,
-            reason=f"Escalation from '{last_tone_used}' to '{proposed_tone}' too aggressive (jump of {jump} levels)",
+            reason=f"Escalation from '{last_tone_used}' to '{proposed_tone}' too aggressive (jump of {jump} levels){patience_hint}",
             current_value=proposed_tone,
-            threshold=f"Max 1 level escalation (try '{TONE_ESCALATION_ORDER[last_idx + 1]}')",
+            threshold=f"Max {max_jump} level escalation (try '{next_tone}')",
         )
 
     def _get_recommended_action(self, gate_results: dict[str, GateResult]) -> str:
