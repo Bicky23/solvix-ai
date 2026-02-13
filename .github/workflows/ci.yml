@@ -27,7 +27,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      - run: uv sync --frozen --dev
+      - run: uv sync --frozen --extra dev
 
       - name: Run ruff check
         run: uv run ruff check src/ tests/
