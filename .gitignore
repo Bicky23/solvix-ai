@@ -51,3 +51,4 @@ docs/
 # Claude Code context
 CLAUDE.md
 QUICKSTART.md
+.claude/

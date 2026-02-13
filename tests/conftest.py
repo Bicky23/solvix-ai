@@ -134,7 +134,7 @@ def sample_generate_draft_request(sample_case_context) -> GenerateDraftRequest:
     return GenerateDraftRequest(
         context=sample_case_context,
         tone="concerned_inquiry",
-        objective="discuss repayment",
+        objective="follow_up",
     )
 
 
