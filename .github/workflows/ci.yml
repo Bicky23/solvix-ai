@@ -74,3 +74,17 @@ jobs:
   #         tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
   #         cache-from: type=gha
   #         cache-to: type=gha,mode=max
+  #
+  # Container image scanning - uncomment when deploying
+  # scan-image:
+  #   needs: build-docker
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: aquasecurity/trivy-action@master
+  #       with:
+  #         image-ref: 'ghcr.io/${{ github.repository }}:${{ github.sha }}'
+  #         format: 'sarif'
+  #         output: 'trivy-results.sarif'
+  #     - uses: github/codeql-action/upload-sarif@v3
+  #       with:
+  #         sarif_file: 'trivy-results.sarif'

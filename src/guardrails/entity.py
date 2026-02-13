@@ -87,7 +87,7 @@ class EntityVerificationGuardrail(BaseGuardrail):
     def __init__(self):
         super().__init__(
             name="entity_verification",
-            severity=GuardrailSeverity.CRITICAL,
+            severity=GuardrailSeverity.HIGH,
         )
 
     def validate(self, output: str, context: CaseContext, **kwargs) -> list[GuardrailResult]:

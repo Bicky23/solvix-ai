@@ -152,6 +152,7 @@ class CaseContext(BaseModel):
     do_not_contact_until: Optional[str] = None  # ISO date if set (from party)
     monthly_touch_count: int = 0  # Current month's touch count (from party)
     relationship_tier: str = "standard"  # From party (vip, standard, high_risk)
+    unsubscribe_requested: bool = False  # True if debtor opted out of communications
 
     # Industry context (NEW - for draft generation and gate evaluation)
     industry: Optional[IndustryInfo] = None

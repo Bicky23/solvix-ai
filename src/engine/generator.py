@@ -206,7 +206,7 @@ class DraftGenerator:
         warnings = [
             r.guardrail_name
             for r in guardrail_result.results
-            if not r.passed and r.severity == GuardrailSeverity.MEDIUM
+            if not r.passed and r.severity in (GuardrailSeverity.MEDIUM, GuardrailSeverity.LOW)
         ]
 
         guardrail_validation = GuardrailValidation(
@@ -252,6 +252,9 @@ class DraftGenerator:
             invoices_referenced=invoices_referenced,
             tokens_used=total_tokens_used,
             guardrail_validation=guardrail_validation,
+            provider=response.provider,
+            model=response.model,
+            is_fallback=(response.provider != llm_client.primary_provider_name),
         )
 
     def _format_industry_context(self, industry) -> str:

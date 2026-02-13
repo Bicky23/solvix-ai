@@ -25,7 +25,7 @@ class TemporalConsistencyGuardrail(BaseGuardrail):
     def __init__(self):
         super().__init__(
             name="temporal_consistency",
-            severity=GuardrailSeverity.HIGH,  # High, not critical - dates can be subjective
+            severity=GuardrailSeverity.MEDIUM,  # Medium - dates can be subjective
         )
 
     def validate(self, output: str, context: CaseContext, **kwargs) -> list[GuardrailResult]:

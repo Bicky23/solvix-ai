@@ -93,9 +93,8 @@ class GateEvaluator:
         )
 
         # 5. Unsubscribe Gate
-        # TODO: Add unsubscribe_requested to context model
         gate_results["unsubscribe"] = self._evaluate_unsubscribe(
-            unsubscribe_requested=False,
+            unsubscribe_requested=context.unsubscribe_requested,
         )
 
         # 6. Escalation Appropriate Gate
@@ -127,6 +126,9 @@ class GateEvaluator:
             gate_results=gate_results,
             recommended_action=recommended_action,
             tokens_used=0,  # No LLM call
+            provider="deterministic",
+            model="rule_engine",
+            is_fallback=False,
         )
 
     def _evaluate_touch_cap(self, monthly_count: int, cap: int) -> GateResult:

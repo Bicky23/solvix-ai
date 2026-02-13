@@ -23,7 +23,7 @@ class ContextualCoherenceGuardrail(BaseGuardrail):
     def __init__(self):
         super().__init__(
             name="contextual_coherence",
-            severity=GuardrailSeverity.MEDIUM,  # Warn but don't block
+            severity=GuardrailSeverity.LOW,  # Log only, don't block
         )
 
     def validate(self, output: str, context: CaseContext, **kwargs) -> list[GuardrailResult]:

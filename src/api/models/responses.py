@@ -38,6 +38,10 @@ class ClassifyResponse(BaseModel):
     tokens_used: Optional[int] = None
     # Guardrail validation results
     guardrail_validation: Optional[GuardrailValidation] = None
+    # Provider metadata
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    is_fallback: bool = False
 
 
 class GenerateDraftResponse(BaseModel):
@@ -50,6 +54,10 @@ class GenerateDraftResponse(BaseModel):
     tokens_used: Optional[int] = None
     # Guardrail validation results
     guardrail_validation: Optional[GuardrailValidation] = None
+    # Provider metadata
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    is_fallback: bool = False
 
 
 class GateResult(BaseModel):
@@ -68,6 +76,10 @@ class EvaluateGatesResponse(BaseModel):
     gate_results: Dict[str, GateResult]
     recommended_action: Optional[str] = None
     tokens_used: Optional[int] = None
+    # Provider metadata
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    is_fallback: bool = False
 
 
 class PartyGateResult(BaseModel):
