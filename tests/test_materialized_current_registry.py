@@ -14,13 +14,13 @@ from src.lake.materialized_current_registry import (
 )
 
 
-def test_ai_compact_registry_matches_the_61_plus_7_rollout_inventory() -> None:
+def test_ai_compact_registry_matches_the_64_plus_7_rollout_inventory() -> None:
     assert len(CORE_MATERIALIZED_CURRENT_VIEWS) == 7
     assert len(ROLLOUT_EMPTY_HOLD_APPLICATION_TABLES) == 5
     assert len(REACTIVATED_APPLICATION_TABLES) == 4
     assert len(INACTIVE_APPLICATION_TABLES) == 25
-    assert len(USEFUL_APPLICATION_MATERIALIZED_CURRENT_VIEWS) == 61
-    assert len(USEFUL_MATERIALIZED_CURRENT_VIEWS) == 68
+    assert len(USEFUL_APPLICATION_MATERIALIZED_CURRENT_VIEWS) == 64
+    assert len(USEFUL_MATERIALIZED_CURRENT_VIEWS) == 71
     assert len(AI_CONTEXT_CURRENT_VIEWS) == 17
 
 
