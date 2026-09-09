@@ -12,18 +12,24 @@ try:
     from solvix_contracts.datalake import (
         CompactCurrentEpochMemberV1 as _SharedCompactCurrentEpochMemberV1,
     )
-    from solvix_contracts.datalake import CompactCurrentEpochV1 as _SharedCompactCurrentEpochV1
     from solvix_contracts.datalake import (
-        compact_current_manifest_digest as _shared_manifest_digest,
+        CompactCurrentEpochV1 as _SharedCompactCurrentEpochV1,
     )
-    from solvix_contracts.datalake import compact_current_relation_for as _shared_relation_for
-    from solvix_contracts.datalake import compact_current_relations as _shared_relations
+    from solvix_contracts.datalake import (
+        compact_current_relation_for as _shared_relation_for,
+    )
+    from solvix_contracts.datalake import (
+        compact_current_relations as _shared_relations,
+    )
+    from solvix_contracts.datalake import (
+        compact_epoch_relations_for_digest as _shared_relations_for_digest,
+    )
 except ImportError:  # Contracts release is deployed backend-first.
     _SharedCompactCurrentEpochMemberV1 = None
     _SharedCompactCurrentEpochV1 = None
-    _shared_manifest_digest = None
     _shared_relation_for = None
     _shared_relations = None
+    _shared_relations_for_digest = None
 
 from .materialized_current_registry import (
     AI_CONTEXT_CURRENT_VIEWS,
@@ -160,16 +166,16 @@ class CompactCurrentEpochV1(BaseModel):
         # independent from the outer pointer epoch id; non-empty validation
         # is enforced by the member model and every member remains bound to
         # its own relation/table/schema contract below.
-        if _shared_manifest_digest is not None:
-            expected_digest = str(_shared_manifest_digest())
-            if self.manifest_digest != expected_digest:
+        if _shared_relations_for_digest is not None:
+            try:
+                expected_relations = {
+                    str(relation.logical_relation)
+                    for relation in _shared_relations_for_digest(self.manifest_digest)
+                }
+            except ValueError as exc:
                 raise ValueError(
-                    "manifest_digest does not match the shared compact-current contract"
-                )
-        if _shared_relations is not None:
-            expected_relations = {
-                str(relation.logical_relation) for relation in _shared_relations()
-            }
+                    "manifest_digest does not match a known shared compact-current contract"
+                ) from exc
             actual_relations = set(logical_relations)
             missing = sorted(expected_relations - actual_relations)
             unexpected = sorted(actual_relations - expected_relations)
@@ -212,17 +218,21 @@ def validate_ai_context_epoch(
         raise CompactCurrentEpochUnavailable(
             "compact_current_epoch tenant_id does not match the handoff tenant"
         )
-    if _shared_relations is None:
+    if _shared_relations is None or _shared_relations_for_digest is None:
         raise CompactCurrentEpochUnavailable(
             "compact_only requires the released shared compact-current contract"
         )
-    relations = tuple(_shared_relations())
-    members = {str(member.logical_relation): member for member in epoch.members}
-    expected_digest = str(_shared_manifest_digest())
-    if str(epoch.manifest_digest) != expected_digest:
+    try:
+        # The Category 2 physical-source promotion retains the same 117
+        # relation count but changes the descriptor digest. Validate an
+        # existing epoch against its own immutable descriptor generation, not
+        # against whichever contract happens to be installed in this worker.
+        relations = tuple(_shared_relations_for_digest(str(epoch.manifest_digest)))
+    except ValueError as exc:
         raise CompactCurrentEpochUnavailable(
-            "compact_current_epoch manifest_digest does not match the shared contract"
-        )
+            "compact_current_epoch_manifest_digest_unknown"
+        ) from exc
+    members = {str(member.logical_relation): member for member in epoch.members}
     if epoch.committed_at.tzinfo is None or epoch.committed_at.utcoffset() is None:
         raise CompactCurrentEpochUnavailable(
             "compact_current_epoch committed_at must include a timezone"
